@@ -1,23 +1,19 @@
-#include <iostream>
+#include "Gomoku.h"
 
-void printBoard() {
-	std::cout << " ";
-	for (int j = 0; j < 15; j++) {
-		std::cout.width(3);
-		std::cout << j;
-	}
-	std::cout << std::endl;
-	for (int i = 0; i < 15; i++) {
-		std::cout.width(2);
-		std::cout << i;
-		for (int j = 0; j < 15; j++) {
-			std::cout << " - ";
-		}
-		std::cout << std::endl;
-	}
+Gomoku::Gomoku()
+{
 }
 
-int main() {
-	printBoard();
-	std::cin.get();
+void Gomoku::placePiece(int x, int y)
+{
+	board.placePiece(x, y, turn);
+	turn = turn == 1 ? 2 : 1;
 }
+
+std::ostream & operator<<(std::ostream & stream, const Gomoku & gomoku)
+{
+	stream << "Player " << gomoku.turn << "'s turn" << std::endl;
+	stream << gomoku.board << std::endl;
+	return stream;
+}
+
