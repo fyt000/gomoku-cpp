@@ -22,12 +22,14 @@ bool Gomoku::placePiece(int x, int y)
 
 void Gomoku::placePiece()
 {
-	auto p = alphaBeta(5, -99999999, 99999999, true, turn);
+	auto p = alphaBeta(3, -99999999, 99999999, true, turn);
 	int x = std::get<1>(p);
 	int y = std::get<2>(p);
 	//lost already
 	if (x == -1 && y == -1) {
 		auto anyP = genBestMoves(turn)[0];
+		x = std::get<1>(anyP);
+		y = std::get<2>(anyP);
 	}
 	placePiece(x, y);
 }
@@ -127,10 +129,10 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 			}
 		}
 	}
-	minX -= 1;
-	maxX += 1;
-	minY -= 1;
-	maxY += 1;
+	minX -= 2;
+	maxX += 2;
+	minY -= 2;
+	maxY += 2;
 	minX = std::max(0, minX);
 	maxX = std::min(BOARDSIZE - 1, maxX);
 	minY = std::max(0, minY);
@@ -164,7 +166,7 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 	});
 
 	//keep top 20 scores	
-	scores.resize(20);
+	//scores.resize(20);
 
 	return scores;
 }
