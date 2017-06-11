@@ -3,15 +3,23 @@
 
 const int BOARDSIZE = 15;
 
+enum Piece {
+	EMPTY,
+	BLACK,
+	WHITE
+};
+
+
 class Board {
 public:	
 	Board();
-	void placePiece(int x,int y,int p);
+	void placePiece(int x,int y,Piece p);
+	Piece getPiece(int x, int y);
 	friend std::ostream& operator<< (std::ostream& stream, const Board& gomoku);
 
 private:
 	int zobristHash;
 	bool hashDirty = true;
 	//maybe store it in a way that is locality friendly
-	int board[BOARDSIZE][BOARDSIZE] = { {0} };
+	Piece board[BOARDSIZE][BOARDSIZE] = { {Piece::EMPTY} };
 };
