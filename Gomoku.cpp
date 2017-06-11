@@ -104,6 +104,10 @@ Piece Gomoku::otherPlayer(Piece p)
 	return p == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
 }
 
+
+//this method still needs some tunning
+//let me try to optimize first
+//then I could probably allow a larger set of moves
 std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 {
 	auto opponent = otherPlayer(cur);
@@ -123,10 +127,10 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 			}
 		}
 	}
-	minX -= 2;
-	maxX += 2;
-	minY -= 2;
-	maxY += 2;
+	minX -= 1;
+	maxX += 1;
+	minY -= 1;
+	maxY += 1;
 	minX = std::max(0, minX);
 	maxX = std::min(BOARDSIZE - 1, maxX);
 	minY = std::max(0, minY);
@@ -138,31 +142,40 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 			if (p == Piece::EMPTY) {
 				board.placePiece(x, y, cur);
 				int curScore = evalBoard(cur, true);
+				board.placePiece(x, y, opponent);
+				curScore += evalBoard(opponent, true);
+				board.placePiece(x, y, Piece::EMPTY);
+				scores.emplace_back(curScore, x, y);
+				/*
+				board.placePiece(x, y, cur);
+				int curScore = evalBoard(cur, true);
 				curScore -= evalBoard(opponent, true);
 				board.placePiece(x, y, opponent);
 				curScore += evalBoard(opponent, true);
 				scores.emplace_back(curScore, x, y);
 				board.placePiece(x, y, Piece::EMPTY);
+				*/
 			}
 		}
 	}
+	//sorting still helps
 	std::sort(scores.begin(), scores.end(), [](const ScoreXY& lhs, const ScoreXY& rhs) {
 		return std::get<0>(lhs) > std::get<0>(rhs);
 	});
 
-	//keep top 15 scores
-	//what happens if scores.size < 15?
-	scores.resize(15);
+	//keep top 20 scores	
+	scores.resize(20);
 
 	return scores;
 }
+
 
 Gomoku::ScoreXY Gomoku::alphaBeta(int depth, int alpha, int beta, bool maximizing, Piece cur)
 {
 	auto opponent = otherPlayer(cur);
 	bool won = checkWinner();
 	if (won) {
-		return { evalBoard(cur,true) - evalBoard(opponent,true),-1,-1 };
+		return { evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 };
 	}
 
 	if (depth == 0) {

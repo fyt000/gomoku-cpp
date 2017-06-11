@@ -18,6 +18,7 @@ public:
 	friend std::ostream& operator<< (std::ostream& stream, const Board& gomoku);
 
 private:
+	//TODO implement zobristHashing and transposition
 	int zobristHash;
 	bool hashDirty = true;
 	//maybe store it in a way that is locality friendly

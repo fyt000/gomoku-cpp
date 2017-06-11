@@ -34,19 +34,21 @@ void readPatternEvalDump(std::string filePath, std::vector<int>& patternEvals) {
 	}
 }
 
-int main() {
+int main(int argc, char** argv) {
+	if (argc != 3) {
+		std::cerr << "need paths to row eval results" << std::endl;
+		return 0;
+	}
+
 	std::vector<int> patternEvals1;
 	std::vector<int> patternEvals2;
 
-	//TODO read dump path from argument
-	//and yes I am developing this on windows (for now)
-	readPatternEvalDump("D:\\gomoku-cpp\\pattern_dump1.txt", patternEvals1);
-	readPatternEvalDump("D:\\gomoku-cpp\\pattern_dump2.txt", patternEvals2);
+	readPatternEvalDump(argv[1], patternEvals1);
+	readPatternEvalDump(argv[2], patternEvals2);
 
 	g = new Gomoku(patternEvals1, patternEvals2);
 	printBoard();
-	//std::string line;
-	//std::getline(std::cin, line)
+	
 	/*
 	int x, y;
 	while (std::cin>>x>>y) {
@@ -67,12 +69,12 @@ int main() {
 		}
 	}*/
 
-	/*
+	
 	while (!g->checkWinner()) {
 		g->placePiece();
 		printBoard();
 	}
-	*/
+	
 	delete g;
 	std::cout << "Press anykey to exit";
 	std::cin.get(); //the enter key from previous input
