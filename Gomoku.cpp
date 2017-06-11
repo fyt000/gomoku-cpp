@@ -175,11 +175,11 @@ Gomoku::ScoreXY Gomoku::alphaBeta(int depth, int alpha, int beta, bool maximizin
 	auto opponent = otherPlayer(cur);
 	bool won = checkWinner();
 	if (won) {
-		return { evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 };
+		return std::make_tuple( evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 );
 	}
 
 	if (depth == 0) {
-		return { evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 };
+		return std::make_tuple( evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 );
 	}
 
 	int bestX = -1;
@@ -224,7 +224,7 @@ Gomoku::ScoreXY Gomoku::alphaBeta(int depth, int alpha, int beta, bool maximizin
 				break;
 		}
 	}
-	return { bestVal,bestX,bestY };
+	return std::make_tuple( bestVal,bestX,bestY );
 }
 
 bool Gomoku::checkWinner()
