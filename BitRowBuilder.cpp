@@ -111,7 +111,7 @@ int BitRowBuilder::LengthOf(int anotherRow)
 	_BitScanReverse(&leadingZero, anotherRow);
 	minToOne = leadingZero;
 #elif __GNUC__
-	minToOne = __builtin_clz(anotherRow);
+	minToOne = 31 - __builtin_clz(anotherRow);
 #else
 	int v = anotherRow;
 	while (v >>= 1) {
