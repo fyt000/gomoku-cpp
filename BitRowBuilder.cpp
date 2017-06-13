@@ -70,7 +70,7 @@ int BitRowBuilder::RowSplice(int someRow, int idx)
 	int startLen = LengthOf(someRow);
 	someRow &= ~(1 << startLen);
 	for (int i = 0; i < idx; i++) {
-		someRow &= ~(1 << startLen - 1 - i);
+		someRow &= ~(1 << (startLen - 1 - i));
 	}
 	someRow |= 1 << (startLen - idx);
 	return someRow;

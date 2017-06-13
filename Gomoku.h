@@ -11,9 +11,35 @@ class Gomoku {
 public:
 	Gomoku();
 	Gomoku(const std::vector<int> &patternLookup1, const std::vector<int> &patternLookup2);
+
+	template<int R, int C>
+	void setBoard(Piece(&board)[R][C])
+	{
+		//c++11 is good
+		this->board = Board(board);
+		int pieceCount = 0;
+		for (int i = 0; i < 15;i++) {
+			for (int j=0;j<15;j++){
+				auto p = board[i][j];
+				switch (p) {
+				case Piece::WHITE :
+					pieceCount -= 1; break;
+				case Piece::BLACK:
+					pieceCount += 1; break;
+				}
+			}
+		}
+		if (pieceCount <= 0) {
+			turn = Piece::BLACK;
+		}
+		else {
+			turn = Piece::WHITE;
+		}
+	}
+
 	bool placePiece(int x,int y);
-	void placePiece();
-	bool checkWinner();
+	std::pair<int,int> placePiece();
+	int checkWinner();
 	friend std::ostream& operator<< (std::ostream& stream, const Gomoku& gomoku);
 
 private:

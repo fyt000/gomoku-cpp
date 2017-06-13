@@ -13,6 +13,15 @@ enum Piece {
 class Board {
 public:	
 	Board();
+	template<int R, int C>
+	Board(Piece(&board)[R][C])
+	{
+		for (int i = 0; i < R; i++) {
+			for (int j = 0; j < C; j++) {
+				this->board[i][j] = board[i][j];
+			}
+		}
+	}
 	void placePiece(int x,int y,Piece p);
 	Piece getPiece(int x, int y);
 	friend std::ostream& operator<< (std::ostream& stream, const Board& gomoku);

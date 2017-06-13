@@ -11,6 +11,9 @@ Gomoku::Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& p
 {
 }
 
+
+
+
 bool Gomoku::placePiece(int x, int y)
 {
 	if (board.getPiece(x, y) != Piece::EMPTY)
@@ -20,7 +23,7 @@ bool Gomoku::placePiece(int x, int y)
 	return true;
 }
 
-void Gomoku::placePiece()
+std::pair<int,int> Gomoku::placePiece()
 {
 	auto p = alphaBeta(3, -99999999, 99999999, true, turn);
 	int x = std::get<1>(p);
@@ -32,6 +35,7 @@ void Gomoku::placePiece()
 		y = std::get<2>(anyP);
 	}
 	placePiece(x, y);
+	return { x,y };
 }
 
 
@@ -229,7 +233,7 @@ Gomoku::ScoreXY Gomoku::alphaBeta(int depth, int alpha, int beta, bool maximizin
 	return std::make_tuple( bestVal,bestX,bestY );
 }
 
-bool Gomoku::checkWinner()
+int Gomoku::checkWinner()
 {
 	int dirx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
 	int diry[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
@@ -260,11 +264,11 @@ bool Gomoku::checkWinner()
 						break;
 				}
 				if (count == 4)
-					return true;
+					return (int)p;
 			}
 		}
 	}
-	return false;
+	return 0;
 }
 
 

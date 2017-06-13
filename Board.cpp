@@ -3,6 +3,8 @@
 Board::Board() {
 
 }
+
+
 void Board::placePiece(int x, int y, Piece p)
 {
 	if (p < 0 || p > 2)
