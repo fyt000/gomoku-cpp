@@ -50,6 +50,32 @@ void isWinnerCheck(http_request request)
 	request.reply(status_codes::OK, responseJson);
 }
 
+void getNextStep(http_request request)
+{
+	cerr << "receiving getNextStep request" << endl;
+	Gomoku g(patternEvals1, patternEvals2);
+	pair<int, int> nextXY;
+	request.extract_json().then([&g, &nextXY](pplx::task<json::value> task) {
+		//I hate json and every json library
+		//protobuf when?
+		auto& jsonMap = task.get();
+		auto& boardArray = jsonMap.at(L"board").as_array();
+		Piece board[BOARDSIZE][BOARDSIZE];
+		for (int i = 0; i < BOARDSIZE; i++) {
+			for (int j = 0; j < BOARDSIZE; j++) {
+				board[i][j] = (Piece)boardArray.at(i*BOARDSIZE + j).as_integer();
+			}
+		}
+		g.setBoard(board);
+		nextXY = g.placePiece();
+
+	}).wait();
+	auto responseJson = json::value::object();
+	responseJson[L"x"] = nextXY.first;
+	responseJson[L"y"] = nextXY.second;
+	request.reply(status_codes::OK, responseJson);
+}
+
 
 int main(int argc, char** argv) {
 
@@ -58,10 +84,14 @@ int main(int argc, char** argv) {
 
 	http_listener winnerListener(L"http://localhost:5000/api/iswinner/");
 	winnerListener.support(methods::POST, isWinnerCheck);
-	
+
+	http_listener nextStepListener(L"http://localhost:5000/api/getnextmove/");
+	nextStepListener.support(methods::POST, getNextStep);
+
 	try
 	{
 		winnerListener.open();
+		nextStepListener.open();
 		std::cout << "Press ENTER to exit." << std::endl;
 
 		std::string line;
