@@ -1,7 +1,7 @@
 #include <cpprest/http_listener.h>
 #include <cpprest/json.h>
+#include <cpprest/uri.h>
 #include "Gomoku.h"
-
 
 using namespace web;
 using namespace web::http;
@@ -33,8 +33,8 @@ void isWinnerCheck(http_request request)
 	request.extract_json().then([&g,&result](pplx::task<json::value> task) {
 		//I hate json and every json library
 		//protobuf when?
-		auto& jsonMap = task.get();
-		auto& boardArray = jsonMap.at(L"board").as_array();
+		const auto& jsonMap = task.get();
+		auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
 		Piece board[BOARDSIZE][BOARDSIZE];
 		for (int i = 0; i < BOARDSIZE; i++) {
 			for (int j = 0; j < BOARDSIZE; j++) {
@@ -46,7 +46,7 @@ void isWinnerCheck(http_request request)
 	}).wait();
 
 	auto responseJson = json::value::object();
-	responseJson[L"winner"] = result;
+	responseJson[utility::conversions::to_utf8string("winner")] = result;
 	request.reply(status_codes::OK, responseJson);
 }
 
@@ -58,8 +58,8 @@ void getNextStep(http_request request)
 	request.extract_json().then([&g, &nextXY](pplx::task<json::value> task) {
 		//I hate json and every json library
 		//protobuf when?
-		auto& jsonMap = task.get();
-		auto& boardArray = jsonMap.at(L"board").as_array();
+		const auto& jsonMap = task.get();
+		auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
 		Piece board[BOARDSIZE][BOARDSIZE];
 		for (int i = 0; i < BOARDSIZE; i++) {
 			for (int j = 0; j < BOARDSIZE; j++) {
@@ -71,8 +71,8 @@ void getNextStep(http_request request)
 
 	}).wait();
 	auto responseJson = json::value::object();
-	responseJson[L"x"] = nextXY.first;
-	responseJson[L"y"] = nextXY.second;
+	responseJson[utility::conversions::to_utf8string("x")] = nextXY.first;
+	responseJson[utility::conversions::to_utf8string("y")] = nextXY.second;
 	request.reply(status_codes::OK, responseJson);
 }
 
@@ -82,10 +82,10 @@ int main(int argc, char** argv) {
 	readPatternEvalDump(argv[1], patternEvals1);
 	readPatternEvalDump(argv[2], patternEvals2);
 
-	http_listener winnerListener(L"http://localhost:5000/api/iswinner/");
+	http_listener winnerListener(utility::conversions::to_utf8string("http://localhost:5000/api/iswinner/"));
 	winnerListener.support(methods::POST, isWinnerCheck);
 
-	http_listener nextStepListener(L"http://localhost:5000/api/getnextmove/");
+	http_listener nextStepListener(utility::conversions::to_utf8string("http://localhost:5000/api/getnextmove/"));
 	nextStepListener.support(methods::POST, getNextStep);
 
 	try
