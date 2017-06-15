@@ -25,29 +25,43 @@ void readPatternEvalDump(std::string filePath, std::vector<int>& patternEvals) {
 	}
 }
 
+void defaultOption(http_request request)
+{
+	http_response response(status_codes::OK);
+	response.headers().add(U("Allow"), U("POST, OPTIONS"));
+	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
+	response.headers().add(U("Access-Control-Allow-Methods"), U("POST, OPTIONS"));
+	response.headers().add(U("Access-Control-Allow-Headers"), U("Content-Type"));
+	request.reply(response);
+}
+
+
 void isWinnerCheck(http_request request)
 {
 	cerr << "receiving post request" << endl;
 	Gomoku g(patternEvals1, patternEvals2);
 	int result = 0;
 	request.extract_json().then([&g,&result](pplx::task<json::value> task) {
-		//I hate json and every json library
-		//protobuf when?
-		const auto& jsonMap = task.get();
-		auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
-		Piece board[BOARDSIZE][BOARDSIZE];
-		for (int i = 0; i < BOARDSIZE; i++) {
+			//I hate json and every json library
+			//protobuf when?
+			const auto& jsonMap = task.get();
+			auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
+			Piece board[BOARDSIZE][BOARDSIZE];
+			for (int i = 0; i < BOARDSIZE; i++) {
 			for (int j = 0; j < BOARDSIZE; j++) {
-				board[i][j] = (Piece) boardArray.at(i*BOARDSIZE + j).as_integer();
+			board[i][j] = (Piece) boardArray.at(i*BOARDSIZE + j).as_integer();
 			}
-		}
-		g.setBoard(board);
-		result = g.checkWinner();
-	}).wait();
+			}
+			g.setBoard(board);
+			result = g.checkWinner();
+			}).wait();
 
 	auto responseJson = json::value::object();
 	responseJson[utility::conversions::to_utf8string("winner")] = result;
-	request.reply(status_codes::OK, responseJson);
+	http_response response(status_codes::OK);
+	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
+	response.set_body(responseJson);
+	request.reply(response);
 }
 
 void getNextStep(http_request request)
@@ -56,25 +70,30 @@ void getNextStep(http_request request)
 	Gomoku g(patternEvals1, patternEvals2);
 	pair<int, int> nextXY;
 	request.extract_json().then([&g, &nextXY](pplx::task<json::value> task) {
-		//I hate json and every json library
-		//protobuf when?
-		const auto& jsonMap = task.get();
-		auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
-		Piece board[BOARDSIZE][BOARDSIZE];
-		for (int i = 0; i < BOARDSIZE; i++) {
+			//I hate json and every json library
+			//protobuf when?
+			const auto& jsonMap = task.get();
+			auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
+			Piece board[BOARDSIZE][BOARDSIZE];
+			for (int i = 0; i < BOARDSIZE; i++) {
 			for (int j = 0; j < BOARDSIZE; j++) {
-				board[i][j] = (Piece)boardArray.at(i*BOARDSIZE + j).as_integer();
+			board[i][j] = (Piece)boardArray.at(i*BOARDSIZE + j).as_integer();
 			}
-		}
-		g.setBoard(board);
-		nextXY = g.placePiece();
+			}
+			g.setBoard(board);
+			nextXY = g.placePiece();
 
-	}).wait();
+			}).wait();
 	auto responseJson = json::value::object();
 	responseJson[utility::conversions::to_utf8string("x")] = nextXY.first;
 	responseJson[utility::conversions::to_utf8string("y")] = nextXY.second;
-	request.reply(status_codes::OK, responseJson);
+	http_response response(status_codes::OK);
+	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
+	response.set_body(responseJson);
+	request.reply(response);
 }
+
+
 
 
 int main(int argc, char** argv) {
@@ -84,9 +103,11 @@ int main(int argc, char** argv) {
 
 	http_listener winnerListener(utility::conversions::to_utf8string("http://localhost:5000/api/iswinner/"));
 	winnerListener.support(methods::POST, isWinnerCheck);
+	winnerListener.support(methods::OPTIONS, defaultOption);
 
 	http_listener nextStepListener(utility::conversions::to_utf8string("http://localhost:5000/api/getnextmove/"));
 	nextStepListener.support(methods::POST, getNextStep);
+	nextStepListener.support(methods::OPTIONS, defaultOption);
 
 	try
 	{
