@@ -29,12 +29,15 @@ public:
 				}
 			}
 		}
-		if (pieceCount <= 0) {
+		if (pieceCount < 0) {
 			turn = Piece::BLACK;
+            std::cerr<<"black going"<<std::endl;
 		}
 		else {
 			turn = Piece::WHITE;
+            std::cerr<<"white going"<<std::endl;
 		}
+		//std::cerr<< turn<<std::endl;
 	}
 
 	bool placePiece(int x,int y);
