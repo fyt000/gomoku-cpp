@@ -4,3 +4,4 @@ build/
 GomokuServer.win32/
 pattern_dump1.txt
 pattern_dump2.txt
+.vscode/

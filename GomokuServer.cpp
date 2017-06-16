@@ -2,6 +2,7 @@
 #include <cpprest/json.h>
 #include <cpprest/uri.h>
 #include "Gomoku.h"
+#include "RowEvaluator.h"
 
 using namespace web;
 using namespace web::http;
@@ -16,14 +17,6 @@ using namespace std;
 
 std::vector<int> patternEvals1;
 std::vector<int> patternEvals2;
-
-void readPatternEvalDump(std::string filePath, std::vector<int>& patternEvals) {
-	std::ifstream fin(filePath.c_str()); //check if I can actually just pass a string now 
-	int eval;
-	while (fin >> eval) {
-		patternEvals.push_back(eval);
-	}
-}
 
 void defaultOption(http_request request)
 {
@@ -98,8 +91,12 @@ void getNextStep(http_request request)
 
 int main(int argc, char** argv) {
 
-	readPatternEvalDump(argv[1], patternEvals1);
-	readPatternEvalDump(argv[2], patternEvals2);
+	if (argc != 2) {
+		std::cerr<< "please pass in the pattern file"<<std::endl;
+	}
+
+	RowEvaluator rowEvaluator;
+	rowEvaluator.setPatterns(argv[1],patternEvals1,patternEvals2);
 
 	http_listener winnerListener(utility::conversions::to_utf8string("http://localhost:5000/api/iswinner/"));
 	winnerListener.support(methods::POST, isWinnerCheck);

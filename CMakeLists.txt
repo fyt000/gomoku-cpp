@@ -8,9 +8,9 @@ find_package(OpenSSL 1.0.0 REQUIRED)
 
 set(CMAKE_CXX_FLAGS "-O2 -std=c++14 -MD")
 
-add_executable(gomoku-cpp Board.cpp BitRowBuilder.cpp Gomoku.cpp GomokuDriver.cpp)
+add_executable(gomoku-cpp Board.cpp BitRowBuilder.cpp Gomoku.cpp GomokuDriver.cpp RowEvaluator.cpp)
 
-add_executable(gomoku-server GomokuServer.cpp Board.cpp BitRowBuilder.cpp Gomoku.cpp)
+add_executable(gomoku-server GomokuServer.cpp Board.cpp BitRowBuilder.cpp Gomoku.cpp RowEvaluator.cpp)
 
 target_link_libraries(gomoku-server
   ${CPPREST_LIB}
@@ -25,5 +25,3 @@ target_link_libraries(gomoku-server
   Boost::regex
   OpenSSL::SSL
 )
-
-add_executable(roweval RowEvaluator.cpp BitRowBuilder.cpp)
