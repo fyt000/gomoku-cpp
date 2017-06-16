@@ -4,6 +4,7 @@
 #include "Gomoku.h"
 #include <fstream>
 #include <vector>
+#include "RowEvaluator.h"
 
 //PLAN:
 //1. make AI work
@@ -26,16 +27,8 @@ void printBoard() {
 	std::cout << *g << std::endl;
 }
 
-void readPatternEvalDump(std::string filePath, std::vector<int>& patternEvals) {
-	std::ifstream fin(filePath.c_str()); //check if I can actually just pass a string now 
-	int eval;
-	while (fin >> eval) {
-		patternEvals.push_back(eval);
-	}
-}
-
 int main(int argc, char** argv) {
-	if (argc != 3) {
+	if (argc != 2) {
 		std::cerr << "need paths to row eval results" << std::endl;
 		return 0;
 	}
@@ -43,8 +36,8 @@ int main(int argc, char** argv) {
 	std::vector<int> patternEvals1;
 	std::vector<int> patternEvals2;
 
-	readPatternEvalDump(argv[1], patternEvals1);
-	readPatternEvalDump(argv[2], patternEvals2);
+	RowEvaluator rowEvaluator;
+	rowEvaluator.setPatterns(argv[1],patternEvals1,patternEvals2);
 
 	g = new Gomoku(patternEvals1, patternEvals2);
 	printBoard();

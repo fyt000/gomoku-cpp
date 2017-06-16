@@ -17,6 +17,8 @@ public:
 	{
 		//c++11 is good
 		this->board = Board(board);
+
+		//pass in the turn value.
 		int pieceCount = 0;
 		for (int i = 0; i < 15;i++) {
 			for (int j=0;j<15;j++){
@@ -29,12 +31,15 @@ public:
 				}
 			}
 		}
-		if (pieceCount <= 0) {
+		if (pieceCount < 0) {
 			turn = Piece::BLACK;
+            std::cerr<<"black going"<<std::endl;
 		}
 		else {
 			turn = Piece::WHITE;
+            std::cerr<<"white going"<<std::endl;
 		}
+		//std::cerr<< turn<<std::endl;
 	}
 
 	bool placePiece(int x,int y);
@@ -43,6 +48,8 @@ public:
 	friend std::ostream& operator<< (std::ostream& stream, const Gomoku& gomoku);
 
 private:
+	// int maxScore = 0;
+	// int wonScore;
 	Piece turn = Piece::BLACK;
 	Board board;
 	const std::vector<int> patternLookup1;
@@ -52,5 +59,6 @@ private:
 	int subRowEval(int subRow, bool isOddStep);
 	Piece otherPlayer(Piece p);
 	std::vector<ScoreXY> genBestMoves(Piece cur);
-	ScoreXY alphaBeta(int depth, int alpha, int beta, bool maximizing, Piece self);
+	ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
+	int singlePieceWinner(int x, int y);
 };

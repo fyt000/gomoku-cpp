@@ -6,18 +6,16 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include "RowEvaluator.h"
 
 using namespace std;
 
-int maxPatLen = 0;
+RowEvaluator::RowEvaluator() {
+	rowEval1 = vector<int>(1 << 16, -1);
+	rowEval2 = vector<int>(1 << 16, -1);
+}
 
-map<int, int> patternEvalMap1;
-map<int, int> patternEvalMap2;
-
-vector<int> rowEval1(1<<16,-1);
-vector<int> rowEval2(1<<16,-1);
-
-vector<int> initDP(int row) {
+vector<int> RowEvaluator::initDP(int row) {
 	int len = BitRowBuilder::LengthOf(row);
 	vector<int> dp(len, -1);
 	for (int i = 0; i < maxPatLen; i++) {
@@ -27,7 +25,7 @@ vector<int> initDP(int row) {
 }
 
 // optimize for a for loop version?
-int rowDP(int row,vector<int>& dp,int idx,bool type) {
+int RowEvaluator::rowDP(int row,vector<int>& dp,int idx,bool type) {
 	int curMax = 0;
 	BitRowBuilder rowBuilder(row);
 	
@@ -72,7 +70,7 @@ int rowDP(int row,vector<int>& dp,int idx,bool type) {
 
 
 
-int genEvalForRow(int row, bool type) {
+int RowEvaluator::genEvalForRow(int row, bool type) {
 
 #define SAVERET(r) {type?rowEval1[row]=r:rowEval2[row]=r; return r;}
 
@@ -109,22 +107,12 @@ int genEvalForRow(int row, bool type) {
 	SAVERET(ret);
 }
 
-void dump_result(string filename, vector<int> result) {
-	ofstream fout(filename.c_str());
-	for (auto item : result) {
-		fout << item << endl;
-	}
-}
 
-
-int main(int argc, char** argv) {
+void RowEvaluator::setPatterns(const string& patternFile, vector<int>& retRowEval1, vector<int>& retRowEval2) {
 	
-	if (argc != 4) {
-		cerr << "pass in the path to pattern file and paths to place the dumps" << endl;
-		return 0;
-	}
-	cout << "Evaluating..." << endl;
-	ifstream fin(argv[1]);
+
+	//cout << "Evaluating..." << endl;
+	ifstream fin(patternFile);
 	string pattern;
 	int eval1;
 	int eval2;
@@ -147,19 +135,13 @@ int main(int argc, char** argv) {
 		patternEvalMap2[intPat]= eval2;
 	}
 
-//	genEvalForRow(0b110011, true);
-//	return 0;
 
 	for (int i = 0; i < (1 << 16); i++) {
 		genEvalForRow(i, true);
 		genEvalForRow(i, false);
-		//cout << i << " " << genEvalForRow(i, true) << " " << genEvalForRow(i, false) << endl;
 	}
 
-	dump_result(argv[2], rowEval1);
-	dump_result(argv[3], rowEval2);
+	retRowEval1 = rowEval1;
+	retRowEval2 = rowEval2;
 
-	cout << "Done" << endl;
-
-	cin.get();
 }
