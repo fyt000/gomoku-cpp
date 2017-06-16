@@ -98,11 +98,11 @@ int main(int argc, char** argv) {
 	RowEvaluator rowEvaluator;
 	rowEvaluator.setPatterns(argv[1],patternEvals1,patternEvals2);
 
-	http_listener winnerListener(utility::conversions::to_utf8string("http://localhost:5000/api/iswinner/"));
+	http_listener winnerListener(utility::conversions::to_utf8string("http://0.0.0.0:5000/api/iswinner/"));
 	winnerListener.support(methods::POST, isWinnerCheck);
 	winnerListener.support(methods::OPTIONS, defaultOption);
 
-	http_listener nextStepListener(utility::conversions::to_utf8string("http://localhost:5000/api/getnextmove/"));
+	http_listener nextStepListener(utility::conversions::to_utf8string("http://0.0.0.0:5000/api/getnextmove/"));
 	nextStepListener.support(methods::POST, getNextStep);
 	nextStepListener.support(methods::OPTIONS, defaultOption);
 
