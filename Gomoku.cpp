@@ -9,9 +9,10 @@ Gomoku::Gomoku()
 Gomoku::Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& patternLookup2): 
 	patternLookup1(patternLookup1), patternLookup2(patternLookup2)
 {
+	// maxScore = (*std::max_element(patternLookup1.begin(),patternLookup1.end()));
+	// maxScore = std::max(maxScore, (*std::max_element(patternLookup2.begin(),patternLookup2.end())));
+	// wonScore = 5*maxScore;
 }
-
-
 
 
 bool Gomoku::placePiece(int x, int y)
@@ -25,7 +26,8 @@ bool Gomoku::placePiece(int x, int y)
 
 std::pair<int,int> Gomoku::placePiece()
 {
-	auto p = alphaBeta(3, -99999999, 99999999, true, turn);
+	//auto p = alphaBeta(4, -99999999, 99999999, true, turn);
+	auto p = negaMax(4,-99999999,99999999,turn,turn);
 	int x = std::get<1>(p);
 	int y = std::get<2>(p);
 	//lost already
@@ -147,21 +149,20 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 			auto p = board.getPiece(x, y);
 			if (p == Piece::EMPTY) {
 				board.placePiece(x, y, cur);
+				// if cur can win, then just go for it
+				if (singlePieceWinner(x, y)) {
+					// std::cout<<board<<std::endl;
+					// std::cout<<x<<" "<<y<<std::endl;
+					// board.placePiece(x, y, Piece::EMPTY);
+					return {std::make_tuple(1,x,y)};
+				}
 				int curScore = evalBoard(cur, true);
 				board.placePiece(x, y, opponent);
 				curScore += evalBoard(opponent, true);
 				board.placePiece(x, y, Piece::EMPTY);
 				scores.emplace_back(curScore, x, y);
-				/*
-				board.placePiece(x, y, cur);
-				int curScore = evalBoard(cur, true);
-				curScore -= evalBoard(opponent, true);
-				board.placePiece(x, y, opponent);
-				curScore += evalBoard(opponent, true);
-				scores.emplace_back(curScore, x, y);
-				board.placePiece(x, y, Piece::EMPTY);
-				*/
 			}
+			
 		}
 	}
 	//sorting still helps
@@ -175,98 +176,100 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
 	return scores;
 }
 
+//based on 4 steps
+// odd total step pass true, false
+// even total step pass false, true
+Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start, Piece next) {
+	auto opponent = otherPlayer(start);
 
-Gomoku::ScoreXY Gomoku::alphaBeta(int depth, int alpha, int beta, bool maximizing, Piece cur)
-{
-	auto opponent = otherPlayer(cur);
-	bool won = checkWinner();
-	if (won) {
-		return std::make_tuple( evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 );
+	//early termination is weird...
+	// 4 B
+	// 3 W
+	// 2 B
+	// 1 W <- if winner at this step then scoreOf(W) - scoreOf(B)
+	// 0 B <- this = scoreOf(B) - scoreOf(W) by default
+
+	if ( checkWinner()) {
+		auto realOpponent = otherPlayer(next);
+		//true false doesn't matter if a winner is decided, I guess maybe
+		int score = evalBoard(next,true) - evalBoard(realOpponent, true);
+		return std::make_tuple(score,-1,-1 );
 	}
-
 	if (depth == 0) {
-		return std::make_tuple( evalBoard(cur,true) - evalBoard(opponent,false),-1,-1 );
+		return std::make_tuple( evalBoard(start,false) - evalBoard(opponent,true),-1,-1 );
 	}
 
 	int bestX = -1;
 	int bestY = -1;
-	int bestVal = 0;
+	int bestVal = -99999999;
 
-	if (maximizing) {
-		bestVal = -99999999;
-		for (const auto& scoreXY : genBestMoves(cur)) {
-			int x = std::get<1>(scoreXY);
-			int y = std::get<2>(scoreXY);
-			board.placePiece(x,y,cur);
-			auto nextScoreXY = alphaBeta(depth - 1, alpha, beta, false, cur);
-			int v = std::get<0>(nextScoreXY);
-			if (v > bestVal) {
-				bestX = x;
-				bestY = y;
-				bestVal = v;
-			}
-			board.placePiece(x, y, Piece::EMPTY);
-			alpha = std::max(alpha, bestVal);
-			if (beta <= alpha)
-				break;
+	for (const auto& scoreXY : genBestMoves(next)) {
+		int x = std::get<1>(scoreXY);
+		int y = std::get<2>(scoreXY);
+		board.placePiece(x,y,next);
+		auto nextScoreXY = negaMax(depth - 1, -1*beta, -1*alpha, start, otherPlayer(next));
+		int v = -1 * std::get<0>(nextScoreXY);
+		// if (depth == 4) {
+		// 	std::cerr<<board;
+		// 	std::cerr<<v<<std::endl;
+		// 	std::cerr<<x<<" "<<y<<std::endl;
+		// }
+		
+		if (v > bestVal) {
+			bestX = x;
+			bestY = y;
+			bestVal = v;
 		}
+		board.placePiece(x, y, Piece::EMPTY);
+		alpha = std::max(alpha, v);
+		if (beta <= alpha)
+			break;
 	}
-	else {
-		bestVal = 99999999;
-		for (const auto& scoreXY : genBestMoves(opponent)) {
-			int x = std::get<1>(scoreXY);
-			int y = std::get<2>(scoreXY);
-			board.placePiece(x, y, opponent);
-			auto nextScoreXY = alphaBeta(depth - 1, alpha, beta, true, cur);
-			int v = std::get<0>(nextScoreXY);
-			if (v < bestVal) {
-				bestX = x;
-				bestY = y;
-				bestVal = v;
-			}
-			board.placePiece(x, y, Piece::EMPTY);
-			beta = std::min(beta, bestVal);
-			if (beta <= alpha)
-				break;
-		}
-	}
-	return std::make_tuple( bestVal,bestX,bestY );
+
+	return std::make_tuple( bestVal,bestX,bestY );	
 }
 
 int Gomoku::checkWinner()
-{
-	int dirx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
-	int diry[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-	
+{	
 	for (int x = 0; x <= BOARDSIZE; x++) {
 		for (int y = 0; y <= BOARDSIZE; y++) {
-			auto p = board.getPiece(x, y);
-			if (p == Piece::EMPTY) {
-				continue;
-			}
-			//how do I zip dirx diry
-			for (int d = 0; d < 8;d++) {
-				int count = 0;
-				int nx = x;
-				int ny = y;
-				for (int i = 0; i <= 4; i++) {
-					nx = nx + dirx[d];
-					ny = ny + diry[d];
-					if (nx >= 0 && nx < 15 && ny >= 0 && ny < 15) {
-						if (board.getPiece(nx, ny) != p) {
-							break;
-						}
-						else {
-							count++;
-						}
-					}
-					else
-						break;
-				}
-				if (count == 4)
-					return (int)p;
+			auto winner = singlePieceWinner(x,y);
+			if (winner) {
+				return winner;
 			}
 		}
+	}
+	return 0;
+}
+
+int Gomoku::singlePieceWinner(int x,int y) {
+	auto p = board.getPiece(x, y);
+	if (p == Piece::EMPTY) {
+		return 0;
+	}
+	int dirx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+	int diry[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+	//how do I zip dirx diry
+	for (int d = 0; d < 8;d++) {
+		int count = 0;
+		int nx = x;
+		int ny = y;
+		for (int i = 0; i <= 4; i++) {
+			nx = nx + dirx[d];
+			ny = ny + diry[d];
+			if (nx >= 0 && nx < 15 && ny >= 0 && ny < 15) {
+				if (board.getPiece(nx, ny) != p) {
+					break;
+				}
+				else {
+					count++;
+				}
+			}
+			else
+				break;
+		}
+		if (count == 4)
+			return (int)p;
 	}
 	return 0;
 }
