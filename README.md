@@ -1,5 +1,12 @@
 # gomoku-cpp
 
+Prerequisite
+
+cpprestsdk https://github.com/Microsoft/cpprestsdk
+
+CMake 3.7+
+
+
 To build
 ```
 mkdir build
@@ -9,6 +16,9 @@ make
 ```
 Run
 ```
-./roweval ../pattern.txt pattern_dump1.txt pattern_dump2.txt
-./gomoku-cpp pattern_dump1.txt pattern_dump2.txt
+./gomoku-server ../pattern.txt
 ```
+
+Can use the same frontend from
+
+https://github.com/three0s/gomoku-py
