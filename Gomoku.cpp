@@ -88,9 +88,33 @@ int Gomoku::rowEval(int x, int y, int dx, int dy, Piece self, bool isOddStep) {
   return val;
 }
 
-// this method still needs some tunning
-// let me try to optimize first
-// then I could probably allow a larger set of moves
+//
+int Gomoku::singlePieceEvaluation(int x, int y, Piece player) {
+  // the evaluation is decided by
+  // the sum of the 6 row evals
+  // of itself and the opponent
+
+  // vertical
+  int val = rowEval(0, y, 1, 0, player, true);
+  // horizontal
+  val += rowEval(x, 0, 0, 1, player, true);
+
+  if (y - x >= 0) {
+    val += rowEval(0, y - x, 1, 1, player, true);
+  } else {
+    val += rowEval(x - y, 0, 1, 1, player, true);
+  }
+  if (x + y < BOARDSIZE) {
+    val += rowEval(0, x + y, 1, -1, player, true);
+  } else {
+    val += rowEval(x + y - (BOARDSIZE - 1), BOARDSIZE - 1, 1, -1, player, true);
+  }
+  return val;
+}
+
+// come up with a better move generation
+// this is actually taking a lot of time I think
+// its being computed everystep and it does multiple board evals
 std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
   auto opponent = otherPlayer(cur);
   std::vector<ScoreXY> scores;
@@ -118,21 +142,25 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
   minY = std::max(0, minY);
   maxY = std::min(BOARDSIZE - 1, maxY);
 
+  // can even do better. -> before state only need to be computed once and reused
+  // but implementation is difficult
+
   for (int x = minX; x <= maxX; x++) {
     for (int y = minY; y <= maxY; y++) {
       auto p = board.getPiece(x, y);
       if (p == Piece::EMPTY) {
+        int before = singlePieceEvaluation(x, y, cur) +
+                     singlePieceEvaluation(x, y, opponent);
         board.placePiece(x, y, cur);
         // if cur can win, then just go for it
         if (singlePieceWinner(x, y)) {
-          // std::cout<<board<<std::endl;
-          // std::cout<<x<<" "<<y<<std::endl;
-          // board.placePiece(x, y, Piece::EMPTY);
+          board.placePiece(x, y, Piece::EMPTY);
           return {std::make_tuple(1, x, y)};
         }
-        int curScore = evalBoard(cur, true);
+        int after1 = singlePieceEvaluation(x, y, cur);
         board.placePiece(x, y, opponent);
-        curScore += evalBoard(opponent, true);
+        int after2 = singlePieceEvaluation(x, y, opponent);
+        int curScore = after1 + after2 - before;
         board.placePiece(x, y, Piece::EMPTY);
         scores.emplace_back(curScore, x, y);
       }
@@ -166,7 +194,6 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
 
   if (checkWinner()) {
     auto realOpponent = otherPlayer(next);
-    // true false doesn't matter if a winner is decided, I guess maybe
     int score = evalBoard(next, true) - evalBoard(realOpponent, true);
     return std::make_tuple(score, -1, -1);
   }

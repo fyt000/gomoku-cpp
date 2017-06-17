@@ -78,6 +78,9 @@ private:
   ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
   int singlePieceWinner(int x, int y);
 
+  //
+  int singlePieceEvaluation(int x,int y, Piece player);
+
   bool inbound(int x, int y) {
     if (x >= 0 && x < 15 && y >= 0 && y < 15)
       return true;
