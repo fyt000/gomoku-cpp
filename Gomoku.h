@@ -49,8 +49,8 @@ public:
   friend std::ostream &operator<<(std::ostream &stream, const Gomoku &gomoku);
 
 private:
-  // int maxScore = 0;
-  // int wonScore;
+  int maxScore = 0;
+  int wonScore;
   Piece turn = Piece::BLACK;
   Board board;
   const std::vector<int> patternLookup1;

@@ -7,11 +7,11 @@ Gomoku::Gomoku() {}
 Gomoku::Gomoku(const std::vector<int> &patternLookup1,
                const std::vector<int> &patternLookup2)
     : patternLookup1(patternLookup1), patternLookup2(patternLookup2) {
-  // maxScore =
-  // (*std::max_element(patternLookup1.begin(),patternLookup1.end()));
-  // maxScore = std::max(maxScore,
-  // (*std::max_element(patternLookup2.begin(),patternLookup2.end())));
-  // wonScore = 5*maxScore;
+  maxScore =
+  (*std::max_element(patternLookup1.begin(),patternLookup1.end()));
+  maxScore = std::max(maxScore,
+  (*std::max_element(patternLookup2.begin(),patternLookup2.end())));
+  wonScore = 2*maxScore;
 }
 
 bool Gomoku::placePiece(int x, int y) {
@@ -92,7 +92,6 @@ int Gomoku::rowEval(int x, int y, int dx, int dy, Piece self, bool isOddStep) {
 int Gomoku::singlePieceEvaluation(int x, int y, Piece player) {
   // the evaluation is decided by
   // the sum of the 6 row evals
-  // of itself and the opponent
 
   // vertical
   int val = rowEval(0, y, 1, 0, player, true);
@@ -172,9 +171,6 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
               return std::get<0>(lhs) > std::get<0>(rhs);
             });
 
-  // keep top 20 scores
-  // scores.resize(20);
-
   return scores;
 }
 
@@ -192,10 +188,12 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
   // 1 W <- if winner at this step then scoreOf(W) - scoreOf(B)
   // 0 B <- this = scoreOf(B) - scoreOf(W) by default
 
-  if (checkWinner()) {
-    auto realOpponent = otherPlayer(next);
-    int score = evalBoard(next, true) - evalBoard(realOpponent, true);
-    return std::make_tuple(score, -1, -1);
+  int winner = checkWinner();
+  if (winner) {
+    //favour early wins
+    //so don't do stupid stuff
+    int coe = winner == (int)next ? 1 : -1;
+    return std::make_tuple(maxScore*(depth+1)*coe, -1, -1);
   }
   if (depth == 0) {
     return std::make_tuple(evalBoard(start, false) - evalBoard(opponent, true),
@@ -213,6 +211,10 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
     auto nextScoreXY =
         negaMax(depth - 1, -1 * beta, -1 * alpha, start, otherPlayer(next));
     int v = -1 * std::get<0>(nextScoreXY);
+    // if (depth == 4) {
+    //   std::cerr<<v<<std::endl;
+    //   std::cerr<<board;
+    // }
 
     if (v > bestVal) {
       bestX = x;
