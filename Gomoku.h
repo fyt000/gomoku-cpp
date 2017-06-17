@@ -56,9 +56,33 @@ private:
 	const std::vector<int> patternLookup2;
 	int evalBoard(Piece player, bool isOddStep);
 	int rowEval(int sx, int sy, int dx, int dy, Piece pType, bool isOddStep);
-	int subRowEval(int subRow, bool isOddStep);
-	Piece otherPlayer(Piece p);
+
+	int subRowEval(int subRow, bool isOddStep)
+	{
+		//less than 5
+		if (subRow <= (1 << 5))
+			return 0;
+
+		if (isOddStep) {
+			return patternLookup1[subRow];
+		}
+		else {
+			return patternLookup2[subRow];
+		}
+	}
+	
+	Piece otherPlayer(Piece p) {
+		return p == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
+	}
+
 	std::vector<ScoreXY> genBestMoves(Piece cur);
 	ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
 	int singlePieceWinner(int x, int y);
+
+	bool inbound(int x,int y) {
+		if (x >= 0 && x < 15 && y >= 0 && y < 15)
+			return true;
+		return false;
+	}
+
 };

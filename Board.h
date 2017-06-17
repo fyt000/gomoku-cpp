@@ -31,5 +31,8 @@ private:
 	int zobristHash;
 	bool hashDirty = true;
 	//maybe store it in a way that is locality friendly
+	//optimization:
+	//each row = 1 single int, 3 types = 2 bits, 15 pieces per row = 30 bits
+	//store rows of all directions
 	Piece board[BOARDSIZE][BOARDSIZE] = { {Piece::EMPTY} };
 };

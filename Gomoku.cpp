@@ -77,7 +77,7 @@ int Gomoku::rowEval(int x, int y, int dx, int dy, Piece self, bool isOddStep)
 	BitRowBuilder rowBuilder;
 	int val = 0;
 	for (int i = 0; i < BOARDSIZE; i++) {
-		if (x < 0 || x >= BOARDSIZE || y < 0 || y >= BOARDSIZE)
+		if (!inbound(x,y))
 			break;
 		Piece p = board.getPiece(x, y);
 		x += dx;
@@ -92,26 +92,6 @@ int Gomoku::rowEval(int x, int y, int dx, int dy, Piece self, bool isOddStep)
 	val += subRowEval(rowBuilder.getRow(), isOddStep);
 	return val;
 }
-
-int Gomoku::subRowEval(int subRow, bool isOddStep)
-{
-	//less than 5
-	if (subRow <= (1 << 5))
-		return 0;
-
-	if (isOddStep) {
-		return patternLookup1[subRow];
-	}
-	else {
-		return patternLookup2[subRow];
-	}
-}
-
-Piece Gomoku::otherPlayer(Piece p)
-{
-	return p == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
-}
-
 
 //this method still needs some tunning
 //let me try to optimize first
@@ -209,11 +189,6 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start, Pie
 		board.placePiece(x,y,next);
 		auto nextScoreXY = negaMax(depth - 1, -1*beta, -1*alpha, start, otherPlayer(next));
 		int v = -1 * std::get<0>(nextScoreXY);
-		// if (depth == 4) {
-		// 	std::cerr<<board;
-		// 	std::cerr<<v<<std::endl;
-		// 	std::cerr<<x<<" "<<y<<std::endl;
-		// }
 		
 		if (v > bestVal) {
 			bestX = x;
@@ -247,29 +222,30 @@ int Gomoku::singlePieceWinner(int x,int y) {
 	if (p == Piece::EMPTY) {
 		return 0;
 	}
-	int dirx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
-	int diry[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+	int dirx[] = { 0, 1, 1, 1};
+	int diry[] = { -1, -1, 0, 1};
+	int dirs[] = {1,-1};
 	//how do I zip dirx diry
-	for (int d = 0; d < 8;d++) {
+	//this is wrong!
+	for (int d = 0; d < 4; d++) {
 		int count = 0;
-		int nx = x;
-		int ny = y;
-		for (int i = 0; i <= 4; i++) {
-			nx = nx + dirx[d];
-			ny = ny + diry[d];
-			if (nx >= 0 && nx < 15 && ny >= 0 && ny < 15) {
+		for (int s=0;s<2;s++){
+			int nx = x;
+			int ny = y;
+			for (int i = 0; i <= 4; i++) {
+				nx = nx + dirs[s]*dirx[d];
+				ny = ny + dirs[s]*diry[d];
+				if (!inbound(nx,ny)) {
+					break;
+				}
 				if (board.getPiece(nx, ny) != p) {
 					break;
 				}
-				else {
-					count++;
-				}
+				count++;
 			}
-			else
-				break;
+			if (count >= 4)
+				return (int)p;
 		}
-		if (count == 4)
-			return (int)p;
 	}
 	return 0;
 }
