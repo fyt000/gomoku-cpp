@@ -7,11 +7,10 @@ Gomoku::Gomoku() {}
 Gomoku::Gomoku(const std::vector<int> &patternLookup1,
                const std::vector<int> &patternLookup2)
     : patternLookup1(patternLookup1), patternLookup2(patternLookup2) {
-  maxScore =
-  (*std::max_element(patternLookup1.begin(),patternLookup1.end()));
-  maxScore = std::max(maxScore,
-  (*std::max_element(patternLookup2.begin(),patternLookup2.end())));
-  wonScore = 2*maxScore;
+  maxScore = (*std::max_element(patternLookup1.begin(), patternLookup1.end()));
+  maxScore = std::max(maxScore, (*std::max_element(patternLookup2.begin(),
+                                                   patternLookup2.end())));
+  wonScore = 2 * maxScore;
 }
 
 bool Gomoku::placePiece(int x, int y) {
@@ -24,6 +23,7 @@ bool Gomoku::placePiece(int x, int y) {
 
 std::pair<int, int> Gomoku::placePiece() {
   // auto p = alphaBeta(4, -99999999, 99999999, true, turn);
+  transposition.clear();
   auto p = negaMax(4, -99999999, 99999999, turn, turn);
   int x = std::get<1>(p);
   int y = std::get<2>(p);
@@ -141,7 +141,8 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
   minY = std::max(0, minY);
   maxY = std::min(BOARDSIZE - 1, maxY);
 
-  // can even do better. -> before state only need to be computed once and reused
+  // can even do better. -> before state only need to be computed once and
+  // reused
   // but implementation is difficult
 
   for (int x = minX; x <= maxX; x++) {
@@ -150,17 +151,17 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
       if (p == Piece::EMPTY) {
         int before = singlePieceEvaluation(x, y, cur) +
                      singlePieceEvaluation(x, y, opponent);
-        board.placePiece(x, y, cur);
+        board.placePiece(x, y, cur, false);
         // if cur can win, then just go for it
         if (singlePieceWinner(x, y)) {
-          board.placePiece(x, y, Piece::EMPTY);
+          board.undoPiece(x, y, false);
           return {std::make_tuple(1, x, y)};
         }
         int after1 = singlePieceEvaluation(x, y, cur);
-        board.placePiece(x, y, opponent);
+        board.placePiece(x, y, opponent, false);
         int after2 = singlePieceEvaluation(x, y, opponent);
         int curScore = after1 + after2 - before;
-        board.placePiece(x, y, Piece::EMPTY);
+        board.undoPiece(x, y, false);
         scores.emplace_back(curScore, x, y);
       }
     }
@@ -179,6 +180,39 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
 // even total step pass false, true
 Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
                                 Piece next) {
+  int alphaOrig = alpha;
+  int bestX = -1;
+  int bestY = -1;
+
+  auto ttEntryPair = transposition.find(board);
+  // why higher depth?
+  if (ttEntryPair != transposition.end()) {
+    auto &ttEntry = ttEntryPair->second;
+    if (ttEntry.depth >= depth) {
+      if (ttEntry.type == TType::EXACT) {
+        return std::make_tuple(ttEntry.value, -1, -1);
+      } else if (ttEntry.type == TType::LOWER) {
+        alpha = std::max(alpha, ttEntry.value);
+      } else if (ttEntry.type == TType::UPPER) {
+        beta = std::min(beta, ttEntry.value);
+      }
+      if (alpha >= beta)
+        return std::make_tuple(ttEntry.value, -1, -1);
+    }
+  }
+
+#define STORERET(score)                                                        \
+  {                                                                            \
+    if (score <= alpha) {                                                      \
+      transposition.emplace(board, TTEntry(score, TType::LOWER, depth));       \
+    } else if (score >= beta) {                                                \
+      transposition.emplace(board, TTEntry(score, TType::UPPER, depth));       \
+    } else {                                                                   \
+      transposition.emplace(board, TTEntry(score, TType::EXACT, depth));       \
+    }                                                                          \
+    return std::make_tuple(score, bestX, bestY);                               \
+  }
+
   auto opponent = otherPlayer(start);
 
   // early termination is weird...
@@ -188,20 +222,20 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
   // 1 W <- if winner at this step then scoreOf(W) - scoreOf(B)
   // 0 B <- this = scoreOf(B) - scoreOf(W) by default
 
+  int score;
   int winner = checkWinner();
   if (winner) {
-    //favour early wins
-    //so don't do stupid stuff
+    // favour early wins
+    // so don't do stupid stuff
     int coe = winner == (int)next ? 1 : -1;
-    return std::make_tuple(maxScore*(depth+1)*coe, -1, -1);
+    score = maxScore * (depth + 1) * coe;
+    STORERET(score);
   }
   if (depth == 0) {
-    return std::make_tuple(evalBoard(start, false) - evalBoard(opponent, true),
-                           -1, -1);
+    score = evalBoard(start, false) - evalBoard(opponent, true);
+    STORERET(score);
   }
 
-  int bestX = -1;
-  int bestY = -1;
   int bestVal = -99999999;
 
   for (const auto &scoreXY : genBestMoves(next)) {
@@ -221,13 +255,13 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
       bestY = y;
       bestVal = v;
     }
-    board.placePiece(x, y, Piece::EMPTY);
+    board.undoPiece(x, y);
     alpha = std::max(alpha, v);
     if (beta <= alpha)
       break;
   }
 
-  return std::make_tuple(bestVal, bestX, bestY);
+  STORERET(bestVal);
 }
 
 int Gomoku::checkWinner() {

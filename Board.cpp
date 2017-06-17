@@ -1,14 +1,42 @@
 #include "Board.h"
+#include <cstring>
 
 Board::Board() {}
 
-void Board::placePiece(int x, int y, Piece p) {
+int64_t Board::zobristValue[15][15][3];
+Board::init Board::initializer;
+
+
+void Board::placePiece(int x, int y, Piece p, bool rehash) {
   if (p < 0 || p > 2)
     return;
   board[x][y] = p;
+  if (rehash) {
+    zobristHash ^= zobristValue[x][y][(int)p];
+  }
+}
+
+void Board::undoPiece(int x,int y, bool rehash) {
+  Piece p = getPiece(x,y);
+  if (p == Piece::EMPTY) {
+    return;
+  }
+  if (rehash) {
+    zobristHash ^= zobristValue[x][y][(int)p];
+  }
+  board[x][y] = Piece::EMPTY;
 }
 
 Piece Board::getPiece(int x, int y) { return board[x][y]; }
+
+int64_t Board::getHash() const{
+  return zobristHash;
+}
+
+bool Board::operator==(const Board &other) const {
+  std::cerr<<"collision\n";
+  return memcmp(board,other.board,sizeof(board)) != 0;
+}
 
 // I wish writing an interface could be this simple
 std::ostream &operator<<(std::ostream &stream, const Board &board) {

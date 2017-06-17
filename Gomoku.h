@@ -1,7 +1,9 @@
 #pragma once
 #include "Board.h"
+#include "TTEntry.h"
 #include <iostream>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 // not implementing score/weight lookup...
@@ -55,6 +57,8 @@ private:
   Board board;
   const std::vector<int> patternLookup1;
   const std::vector<int> patternLookup2;
+  std::unordered_map<Board, TTEntry, BoardHasher> transposition;
+
   int evalBoard(Piece player, bool isOddStep);
   int rowEval(int sx, int sy, int dx, int dy, Piece pType, bool isOddStep);
 
@@ -79,7 +83,7 @@ private:
   int singlePieceWinner(int x, int y);
 
   //
-  int singlePieceEvaluation(int x,int y, Piece player);
+  int singlePieceEvaluation(int x, int y, Piece player);
 
   bool inbound(int x, int y) {
     if (x >= 0 && x < 15 && y >= 0 && y < 15)

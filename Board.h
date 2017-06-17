@@ -1,9 +1,12 @@
 #pragma once
 #include <iostream>
+#include <random>
+
 
 const int BOARDSIZE = 15;
 
 enum Piece { EMPTY, BLACK, WHITE };
+
 
 class Board {
 public:
@@ -15,17 +18,47 @@ public:
       }
     }
   }
-  void placePiece(int x, int y, Piece p);
+  // void placePiece(int x, int y, Piece p);
+  void placePiece(int x, int y, Piece p, bool rehash = true);
+  void undoPiece(int x, int y, bool rehash = true);
   Piece getPiece(int x, int y);
+  int64_t getHash() const;
+
+  bool operator==(const Board &other) const;
+
   friend std::ostream &operator<<(std::ostream &stream, const Board &gomoku);
 
 private:
   // TODO implement zobristHashing and transposition
-  int zobristHash;
-  bool hashDirty = true;
+  int64_t zobristHash = 0;
   // maybe store it in a way that is locality friendly
   // optimization:
   // each row = 1 single int, 3 types = 2 bits, 15 pieces per row = 30 bits
   // store rows of all directions
   Piece board[BOARDSIZE][BOARDSIZE] = {{Piece::EMPTY}};
+
+  static int64_t zobristValue[BOARDSIZE][BOARDSIZE][3];
+  static class init {
+  public:
+    init() {
+      std::mt19937_64 randGen(std::random_device{}());
+      randGen.discard(700000);
+      for (int i = 0; i < BOARDSIZE; i++) {
+        for (int j = 0; j < BOARDSIZE; j++) {
+          for (int k = 1; k <= 2; k++) {
+            zobristValue[i][j][k] = randGen();
+          }
+        }
+      }
+    }
+  } initializer;
 };
+
+
+class BoardHasher {
+  public:
+  size_t operator() (Board const& b) const {
+    return b.getHash();
+  }
+};
+
