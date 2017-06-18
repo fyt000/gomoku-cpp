@@ -7,6 +7,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include <atomic>
 
 // not implementing score/weight lookup...
 // will add the other script that does it
@@ -65,10 +66,12 @@ private:
   //lets see how it works
   // static std::mutex ttLock;
   // static std::unordered_map<Board, TTEntry, BoardHasher> transposition;
+  // use boost read/write lock?
   std::mutex ttLock;
   std::unordered_map<Board, TTEntry, BoardHasher> transposition;
 
-  int nodesVisited = 0;
+  std::atomic<int> nodesVisited;
+
 
   int checkWinner(Board &board);
   int evalBoard(Board &board, Piece player, bool isOddStep);
@@ -92,7 +95,7 @@ private:
   }
 
   std::vector<ScoreXY> genBestMoves(Board &board, Piece cur);
-  ScoreXY negaMax(Board &board, int depth, int alpha, int beta, Piece start,
+  ScoreXY negaScout(Board &board, int depth, int alpha, int beta, Piece start,
                   Piece next);
   int singlePieceWinner(Board &board, int x, int y);
 

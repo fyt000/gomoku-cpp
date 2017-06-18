@@ -18,7 +18,7 @@ Gomoku::Gomoku(const std::vector<int> &patternLookup1,
   wonScore = 2 * maxScore;
 }
 
-bool Gomoku::placePiece(int x, int y) {
+bool Gomoku::placePiece(int x,int y) {
   if (curBoard.getPiece(x, y) != Piece::EMPTY)
     return false;
   curBoard.placePiece(x, y, turn);
@@ -31,40 +31,56 @@ std::pair<int, int> Gomoku::placePiece(int maxDepth) {
   int x;
   int y;
   int score;
+  nodesVisited.store(0);
   // transposition.clear();
   std::vector<std::thread> searcher;
   std::vector<std::future<ScoreXY>> results;
   auto t1 = std::chrono::high_resolution_clock::now();
 
-  // TODO: investigate other multithreading techniques
-  // as the current one does nothing
-  for (int depth = maxDepth; depth <= maxDepth; depth++) {
-    std::promise<ScoreXY> r;
-    results.emplace_back(r.get_future());
-    searcher.emplace_back(
-        [this, depth](std::promise<ScoreXY> &&r) {
-          Board boardCopy(curBoard);
-          auto p = negaMax(boardCopy, depth, -99999999, 99999999, turn, turn);
-          r.set_value(p);
-        },
-        std::move(r));
+  bool threaded = true;
+  ScoreXY p;
+  if (threaded) {
+    // TODO: investigate other multithreading techniques
+    // as the current one does nothing
+    for (int depth = maxDepth; depth <= maxDepth; depth++) {
+      std::promise<ScoreXY> r;
+      results.emplace_back(r.get_future());
+      searcher.emplace_back(
+          [this, depth](std::promise<ScoreXY> &&r) {
+            Board boardCopy(curBoard);
+            auto p = negaScout(boardCopy, depth, -99999999, 99999999, turn, turn);
+            r.set_value(p);
+          },
+          std::move(r));
+    }
+    for (auto &t : searcher) {
+      t.join();
+    }
+    // only care about the last one for now
+    p = results.back().get();
+
+  } else {
+    for (int depth = 1; depth <= maxDepth; depth++) {
+      Board boardCopy(curBoard);
+      p = negaScout(boardCopy, depth, -99999999, 99999999, turn, turn);
+      // firstGuess = p;
+      std::cerr << "next first guess " << std::get<1>(p) << " "
+                << std::get<2>(p) << std::endl;
+    }
   }
-  for (auto &t : searcher) {
-    t.join();
-  }
+
   auto t2 = std::chrono::high_resolution_clock::now();
   auto duration =
       std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
-  std::cout << duration << '\t' << nodesVisited << std::endl;
-  nodesVisited = 0;
+  std::cout << duration << '\t' << nodesVisited.load() << std::endl;
+
   // std::cout << "transposition size " << transposition.size() << std::endl;
 
-  // only care about the last one for now
-  auto p = results.back().get();
   x = std::get<1>(p);
   y = std::get<2>(p);
   // lost already
   if (x == -1 && y == -1) {
+    std::cout << "go add best move in TTEntry" << std::endl;
     auto anyP = genBestMoves(curBoard, turn)[0];
     x = std::get<1>(anyP);
     y = std::get<2>(anyP);
@@ -232,17 +248,17 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Board &board, Piece cur) {
   return scores;
 }
 
-Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
+Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
                                 Piece start, Piece next) {
   int bestX = -1;
   int bestY = -1;
 
-  //A tt hit always returns (-1,-1)
-  //this only works because tt gets cleared each placePiece
-  //and thus, everytime we call negaMax from root
-  //the root will be a miss
-  //therefore, we don't need the best step
-  //as the loop will find one for us
+  // A tt hit always returns (-1,-1)
+  // this only works because tt gets cleared each placePiece
+  // and thus, everytime we call negaScout from root
+  // the root will be a miss
+  // therefore, we don't need the best step
+  // as the loop will find one for us
   {
     std::lock_guard<std::mutex> lock(ttLock);
     auto ttEntryPair = transposition.find(board);
@@ -265,29 +281,40 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
     }
   }
 
-  //ok how does the update work?
-  //on a single thread
-  //if not in table (find failure) - do whatever
-  //tt in table but not enough depth
-  //gets updated to the higher depth... (emplace does not update!)
-  //so always update in single threaded!
-  //nvm didn't seem to do a thing
+// ok how does the update work?
+// on a single thread
+// if not in table (find failure) - do whatever
+// tt in table but not enough depth
+// gets updated to the higher depth... (emplace does not update!)
+// so always update in single threaded!
+// nvm didn't seem to do a thing
 
 #define STORERET(score)                                                        \
   {                                                                            \
     std::lock_guard<std::mutex> lock(ttLock);                                  \
+    auto ttEntryPair = transposition.find(board);                              \
+    TType type;                                                                \
     if (score <= alpha) {                                                      \
-      transposition[board]=TTEntry(score, TType::LOWER, depth);                \
+      type = TType::LOWER;                                                     \
     } else if (score >= beta) {                                                \
-      transposition[board]=TTEntry(score, TType::UPPER, depth);                \
+      type = TType::UPPER;                                                     \
     } else {                                                                   \
-      transposition[board]=TTEntry(score, TType::EXACT, depth);                \
+      type = TType::EXACT;                                                     \
+    }                                                                          \
+    if (ttEntryPair == transposition.end()) {                                  \
+      transposition[board] = TTEntry(score, TType::EXACT, depth);              \
+    } else {                                                                   \
+      auto &ttEntry = ttEntryPair->second;                                     \
+      if (ttEntry.depth <= depth) {                                            \
+        ttEntry.type = type;                                                   \
+        ttEntry.value = score;                                                 \
+      }                                                                        \
     }                                                                          \
     return std::make_tuple(score, bestX, bestY);                               \
   }
 
-#define STORERETX(score) {return std::make_tuple(score,bestX,bestY);}
-
+#define STORERETX(score)                                                       \
+  { return std::make_tuple(score, bestX, bestY); }
 
   auto opponent = otherPlayer(start);
 
@@ -345,22 +372,24 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
   int bestVal = -99999999;
 
   bool firstNode = true;
-  for (const auto &scoreXY : genBestMoves(board, next)) {
+  auto moves = genBestMoves(board, next);
+
+  for (const auto &scoreXY : moves) {
     int x = std::get<1>(scoreXY);
     int y = std::get<2>(scoreXY);
     board.placePiece(x, y, next);
     ScoreXY nextScoreXY;
     if (firstNode) {
       nextScoreXY =
-          negaMax(board, depth - 1, -beta, -alpha, start, otherPlayer(next));
+          negaScout(board, depth - 1, -beta, -alpha, start, otherPlayer(next));
       firstNode = false;
     } else {
-      nextScoreXY = negaMax(board, depth - 1, -alpha - 1, -alpha, start,
+      nextScoreXY = negaScout(board, depth - 1, -alpha - 1, -alpha, start,
                             otherPlayer(next));
       int v = -1 * std::get<0>(nextScoreXY);
       if (alpha < v && v < beta) {
         nextScoreXY =
-            negaMax(board, depth - 1, -beta, -v, start, otherPlayer(next));
+            negaScout(board, depth - 1, -beta, -v, start, otherPlayer(next));
       }
     }
     int v = -1 * std::get<0>(nextScoreXY);
