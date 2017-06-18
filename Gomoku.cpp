@@ -4,6 +4,9 @@
 #include <chrono>
 #include <future>
 
+// std::mutex Gomoku::ttLock;
+// std::unordered_map<Board, TTEntry, BoardHasher> Gomoku::transposition;
+
 Gomoku::Gomoku() {}
 
 Gomoku::Gomoku(const std::vector<int> &patternLookup1,
@@ -24,11 +27,11 @@ bool Gomoku::placePiece(int x, int y) {
 }
 
 std::pair<int, int> Gomoku::placePiece(int maxDepth) {
-
+  // std::cout<<sizeof(curBoard)<<std::endl;
   int x;
   int y;
   int score;
-  transposition.clear();
+  // transposition.clear();
   std::vector<std::thread> searcher;
   std::vector<std::future<ScoreXY>> results;
   auto t1 = std::chrono::high_resolution_clock::now();
@@ -51,8 +54,11 @@ std::pair<int, int> Gomoku::placePiece(int maxDepth) {
   }
   auto t2 = std::chrono::high_resolution_clock::now();
   auto duration =
-      std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-  std::cout << "total took " << duration << std::endl;
+      std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  std::cout << duration << '\t' << nodesVisited << std::endl;
+  nodesVisited = 0;
+  // std::cout << "transposition size " << transposition.size() << std::endl;
+
   // only care about the last one for now
   auto p = results.back().get();
   x = std::get<1>(p);
@@ -220,6 +226,8 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Board &board, Piece cur) {
             [](const ScoreXY &lhs, const ScoreXY &rhs) {
               return std::get<0>(lhs) > std::get<0>(rhs);
             });
+  // any resize makes it real weak
+  // scores.resize(25);
 
   return scores;
 }
@@ -229,6 +237,12 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
   int bestX = -1;
   int bestY = -1;
 
+  //A tt hit always returns (-1,-1)
+  //this only works because tt gets cleared each placePiece
+  //and thus, everytime we call negaMax from root
+  //the root will be a miss
+  //therefore, we don't need the best step
+  //as the loop will find one for us
   {
     std::lock_guard<std::mutex> lock(ttLock);
     auto ttEntryPair = transposition.find(board);
@@ -251,21 +265,29 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
     }
   }
 
+  //ok how does the update work?
+  //on a single thread
+  //if not in table (find failure) - do whatever
+  //tt in table but not enough depth
+  //gets updated to the higher depth... (emplace does not update!)
+  //so always update in single threaded!
+  //nvm didn't seem to do a thing
+
 #define STORERET(score)                                                        \
   {                                                                            \
     std::lock_guard<std::mutex> lock(ttLock);                                  \
     if (score <= alpha) {                                                      \
-      transposition.emplace(                                                   \
-          std::make_pair(board, TTEntry(score, TType::LOWER, depth)));         \
+      transposition[board]=TTEntry(score, TType::LOWER, depth);                \
     } else if (score >= beta) {                                                \
-      transposition.emplace(                                                   \
-          std::make_pair(board, TTEntry(score, TType::UPPER, depth)));         \
+      transposition[board]=TTEntry(score, TType::UPPER, depth);                \
     } else {                                                                   \
-      transposition.emplace(                                                   \
-          std::make_pair(board, TTEntry(score, TType::EXACT, depth)));         \
+      transposition[board]=TTEntry(score, TType::EXACT, depth);                \
     }                                                                          \
     return std::make_tuple(score, bestX, bestY);                               \
   }
+
+#define STORERETX(score) {return std::make_tuple(score,bestX,bestY);}
+
 
   auto opponent = otherPlayer(start);
 
@@ -291,6 +313,7 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
   int score;
   int winner = checkWinner(board);
   if (winner) {
+    nodesVisited++;
     // favour early wins
     // so don't do stupid stuff
     // if someone won, it will not be next!
@@ -301,6 +324,7 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
     STORERET(score);
   }
   if (depth == 0) {
+    nodesVisited++;
     // always evaluate in terms of the start player is wrong!
     // it works for even steps but not odd
     // because eval is not symetric I guess transposition doesn't work that well
@@ -320,12 +344,25 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
 
   int bestVal = -99999999;
 
+  bool firstNode = true;
   for (const auto &scoreXY : genBestMoves(board, next)) {
     int x = std::get<1>(scoreXY);
     int y = std::get<2>(scoreXY);
     board.placePiece(x, y, next);
-    auto nextScoreXY = negaMax(board, depth - 1, -1 * beta, -1 * alpha, start,
-                               otherPlayer(next));
+    ScoreXY nextScoreXY;
+    if (firstNode) {
+      nextScoreXY =
+          negaMax(board, depth - 1, -beta, -alpha, start, otherPlayer(next));
+      firstNode = false;
+    } else {
+      nextScoreXY = negaMax(board, depth - 1, -alpha - 1, -alpha, start,
+                            otherPlayer(next));
+      int v = -1 * std::get<0>(nextScoreXY);
+      if (alpha < v && v < beta) {
+        nextScoreXY =
+            negaMax(board, depth - 1, -beta, -v, start, otherPlayer(next));
+      }
+    }
     int v = -1 * std::get<0>(nextScoreXY);
     // if (depth == 5) {
     //   std::cerr << v << std::endl;
@@ -368,8 +405,6 @@ int Gomoku::singlePieceWinner(Board &board, int x, int y) {
   int dirx[] = {0, 1, 1, 1};
   int diry[] = {-1, -1, 0, 1};
   int dirs[] = {1, -1};
-  // how do I zip dirx diry
-  // this is wrong!
   for (int d = 0; d < 4; d++) {
     int count = 0;
     for (int s = 0; s < 2; s++) {
@@ -387,7 +422,7 @@ int Gomoku::singlePieceWinner(Board &board, int x, int y) {
         count++;
       }
       if (count >= 4)
-        return (int)p;
+        return (unsigned char)p;
     }
   }
   return 0;

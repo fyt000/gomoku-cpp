@@ -60,8 +60,15 @@ private:
   Board curBoard;
   const std::vector<int> patternLookup1;
   const std::vector<int> patternLookup2;
-  std::unordered_map<Board, TTEntry, BoardHasher> transposition;
+
+  //shared across all!
+  //lets see how it works
+  // static std::mutex ttLock;
+  // static std::unordered_map<Board, TTEntry, BoardHasher> transposition;
   std::mutex ttLock;
+  std::unordered_map<Board, TTEntry, BoardHasher> transposition;
+
+  int nodesVisited = 0;
 
   int checkWinner(Board &board);
   int evalBoard(Board &board, Piece player, bool isOddStep);

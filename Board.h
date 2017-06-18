@@ -5,7 +5,7 @@
 
 const int BOARDSIZE = 15;
 
-enum Piece { EMPTY, BLACK, WHITE };
+enum Piece : unsigned char { EMPTY, BLACK, WHITE };
 
 
 class Board {
@@ -43,9 +43,9 @@ private:
   static class init {
   public:
     init() {
-      //std::mt19937_64 randGen(std::random_device{}());
-      //randGen.discard(700000);
-      std::mt19937_64 randGen(1233211);
+      std::mt19937_64 randGen(std::random_device{}());
+      randGen.discard(700000);
+      //std::mt19937_64 randGen(1233211);
       for (int i = 0; i < BOARDSIZE; i++) {
         for (int j = 0; j < BOARDSIZE; j++) {
           zobristValue[i][j][0] = 0;

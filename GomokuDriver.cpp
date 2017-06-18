@@ -6,15 +6,6 @@
 #include <string>
 #include <vector>
 
-// PLAN:
-// 1. make AI work
-// 2. multithreading on top of AI
-// 3. protobuf/thrift for interprocess communicating (self-learn), and web
-// interface
-
-// focus on getting stuff done
-// will refactor later
-
 Gomoku *g;
 
 void printBoard() {
@@ -61,9 +52,11 @@ int main(int argc, char **argv) {
                   std::cout << "Already occupied, try again" << std::endl;
           }
   }*/
-
+  int steps = 0;
   while (!g->checkWinner()) {
-    g->placePiece();
+    //step 4 goes first vs step 5 going second
+    g->placePiece(5);
+    steps++;
     printBoard();
   }
 
