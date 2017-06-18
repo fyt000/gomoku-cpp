@@ -1,6 +1,7 @@
 #include "Gomoku.h"
 #include "BitRowBuilder.h"
 #include <algorithm>
+#include <chrono>
 
 Gomoku::Gomoku() {}
 
@@ -24,9 +25,28 @@ bool Gomoku::placePiece(int x, int y) {
 std::pair<int, int> Gomoku::placePiece() {
   // auto p = alphaBeta(4, -99999999, 99999999, true, turn);
   transposition.clear();
-  auto p = negaMax(4, -99999999, 99999999, turn, turn);
-  int x = std::get<1>(p);
-  int y = std::get<2>(p);
+
+  int x;
+  int y;
+  int score;
+  int64_t totalDuration = 0;
+  for (int depth = 1; depth <= 4; depth++) {
+    auto t1 = std::chrono::high_resolution_clock::now();
+    auto p = negaMax(depth, -99999999, 99999999, turn, turn);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+    totalDuration += duration;
+    // std::cout << duration << std::endl;
+    score = std::get<0>(p);
+    x = std::get<1>(p);
+    y = std::get<2>(p);
+    if (score >= maxScore || score <= -1*maxScore) {
+      break;
+    }
+  }
+  std::cout << "total took " << totalDuration << std::endl;
+
   // lost already
   if (x == -1 && y == -1) {
     auto anyP = genBestMoves(turn)[0];
@@ -175,20 +195,18 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur) {
   return scores;
 }
 
-// based on 4 steps
-// odd total step pass true, false
-// even total step pass false, true
 Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
                                 Piece next) {
-  int alphaOrig = alpha;
   int bestX = -1;
   int bestY = -1;
 
   auto ttEntryPair = transposition.find(board);
   // why higher depth?
   if (ttEntryPair != transposition.end()) {
+    // std::cerr<<"found same board\n";
     auto &ttEntry = ttEntryPair->second;
     if (ttEntry.depth >= depth) {
+      // std::cerr << ttEntryPair->first;
       if (ttEntry.type == TType::EXACT) {
         return std::make_tuple(ttEntry.value, -1, -1);
       } else if (ttEntry.type == TType::LOWER) {
@@ -204,11 +222,14 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
 #define STORERET(score)                                                        \
   {                                                                            \
     if (score <= alpha) {                                                      \
-      transposition.emplace(board, TTEntry(score, TType::LOWER, depth));       \
+      transposition.emplace(                                                   \
+          std::make_pair(board, TTEntry(score, TType::LOWER, depth)));         \
     } else if (score >= beta) {                                                \
-      transposition.emplace(board, TTEntry(score, TType::UPPER, depth));       \
+      transposition.emplace(                                                   \
+          std::make_pair(board, TTEntry(score, TType::UPPER, depth)));         \
     } else {                                                                   \
-      transposition.emplace(board, TTEntry(score, TType::EXACT, depth));       \
+      transposition.emplace(                                                   \
+          std::make_pair(board, TTEntry(score, TType::EXACT, depth)));         \
     }                                                                          \
     return std::make_tuple(score, bestX, bestY);                               \
   }
@@ -220,19 +241,44 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
   // 3 W
   // 2 B
   // 1 W <- if winner at this step then scoreOf(W) - scoreOf(B)
-  // 0 B <- this = scoreOf(B) - scoreOf(W) by default
+  // 0 B <- this = scoreOf(B,f) - scoreOf(W,t) by default
 
+  // if odd number of steps...
+  // requires:
+  // 1 B
+  // 0 W <- scoreOf(B,t) - scoreOf(W,f)
+
+  // 3 B
+  // 2 W <- winner at this step, then black won, so we need -ve score
+  // 1 B <- winner at this step, white won, again negative
+  // 0 W <- winner at this step, black won, negative
+
+  // if I add iterative deepening
+  // how does this work?
   int score;
   int winner = checkWinner();
   if (winner) {
     // favour early wins
     // so don't do stupid stuff
-    int coe = winner == (int)next ? 1 : -1;
+    // if someone won, it will not be next!
+    // so the coe should always be negative!
+    // int coe = winner == (int)next ? 1 : -1;
+    int coe = -1;
     score = maxScore * (depth + 1) * coe;
     STORERET(score);
   }
   if (depth == 0) {
-    score = evalBoard(start, false) - evalBoard(opponent, true);
+    // always evaluate in terms of the start player is wrong!
+    // it works for even steps but not odd
+    // because eval is not symetric I guess transposition doesn't work that well
+    bool totalOdd = next == start;
+    if (!totalOdd) {
+      score = evalBoard(start, totalOdd) - evalBoard(opponent, !totalOdd);
+    }
+    else {
+      score = evalBoard(opponent, totalOdd) - evalBoard(start, !totalOdd);
+    }
+    
     STORERET(score);
   }
 
@@ -242,8 +288,8 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start,
     int x = std::get<1>(scoreXY);
     int y = std::get<2>(scoreXY);
     board.placePiece(x, y, next);
-    auto nextScoreXY =
-        negaMax(depth - 1, -1 * beta, -1 * alpha, start, otherPlayer(next));
+    auto nextScoreXY = negaMax(depth - 1, -1 * beta, -1 * alpha, start,
+                               otherPlayer(next));
     int v = -1 * std::get<0>(nextScoreXY);
     // if (depth == 4) {
     //   std::cerr<<v<<std::endl;

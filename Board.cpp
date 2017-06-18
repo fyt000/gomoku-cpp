@@ -34,8 +34,7 @@ int64_t Board::getHash() const{
 }
 
 bool Board::operator==(const Board &other) const {
-  std::cerr<<"collision\n";
-  return memcmp(board,other.board,sizeof(board)) != 0;
+  return memcmp(board,other.board,sizeof(board)) == 0;
 }
 
 // I wish writing an interface could be this simple

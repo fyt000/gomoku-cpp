@@ -14,6 +14,8 @@ public:
   template <int R, int C> Board(Piece (&board)[R][C]) {
     for (int i = 0; i < R; i++) {
       for (int j = 0; j < C; j++) {
+        Piece p = board[i][j];
+        zobristHash ^= zobristValue[i][j][(int)p];
         this->board[i][j] = board[i][j];
       }
     }
@@ -41,10 +43,12 @@ private:
   static class init {
   public:
     init() {
-      std::mt19937_64 randGen(std::random_device{}());
-      randGen.discard(700000);
+      //std::mt19937_64 randGen(std::random_device{}());
+      //randGen.discard(700000);
+      std::mt19937_64 randGen(1233211);
       for (int i = 0; i < BOARDSIZE; i++) {
         for (int j = 0; j < BOARDSIZE; j++) {
+          zobristValue[i][j][0] = 0;
           for (int k = 1; k <= 2; k++) {
             zobristValue[i][j][k] = randGen();
           }
@@ -58,6 +62,7 @@ private:
 class BoardHasher {
   public:
   size_t operator() (Board const& b) const {
+    //std::cerr<<b.getHash()<<std::endl;
     return b.getHash();
   }
 };
