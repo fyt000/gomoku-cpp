@@ -2,6 +2,8 @@
 #include "Board.h"
 #include "TTEntry.h"
 #include <iostream>
+#include <mutex>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -18,7 +20,7 @@ public:
 
   template <int R, int C> void setBoard(Piece (&board)[R][C]) {
     // c++11 is good
-    this->board = Board(board);
+    this->curBoard = Board(board);
 
     // pass in the turn value.
     int pieceCount = 0;
@@ -48,19 +50,23 @@ public:
   bool placePiece(int x, int y);
   std::pair<int, int> placePiece();
   int checkWinner();
+
   friend std::ostream &operator<<(std::ostream &stream, const Gomoku &gomoku);
 
 private:
   int maxScore = 0;
   int wonScore;
   Piece turn = Piece::BLACK;
-  Board board;
+  Board curBoard;
   const std::vector<int> patternLookup1;
   const std::vector<int> patternLookup2;
   std::unordered_map<Board, TTEntry, BoardHasher> transposition;
+  std::mutex ttLock;
 
-  int evalBoard(Piece player, bool isOddStep);
-  int rowEval(int sx, int sy, int dx, int dy, Piece pType, bool isOddStep);
+  int checkWinner(Board &board);
+  int evalBoard(Board &board, Piece player, bool isOddStep);
+  int rowEval(Board &board, int sx, int sy, int dx, int dy, Piece pType,
+              bool isOddStep);
 
   int subRowEval(int subRow, bool isOddStep) {
     // less than 5
@@ -78,12 +84,13 @@ private:
     return p == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
   }
 
-  std::vector<ScoreXY> genBestMoves(Piece cur);
-  ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
-  int singlePieceWinner(int x, int y);
+  std::vector<ScoreXY> genBestMoves(Board &board, Piece cur);
+  ScoreXY negaMax(Board &board, int depth, int alpha, int beta, Piece start,
+                  Piece next);
+  int singlePieceWinner(Board &board, int x, int y);
 
   //
-  int singlePieceEvaluation(int x, int y, Piece player);
+  int singlePieceEvaluation(Board &board, int x, int y, Piece player);
 
   bool inbound(int x, int y) {
     if (x >= 0 && x < 15 && y >= 0 && y < 15)
