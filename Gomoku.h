@@ -48,7 +48,7 @@ public:
   }
 
   bool placePiece(int x, int y);
-  std::pair<int, int> placePiece();
+  std::pair<int, int> placePiece(int depth = 4);
   int checkWinner();
 
   friend std::ostream &operator<<(std::ostream &stream, const Gomoku &gomoku);

@@ -23,16 +23,19 @@ bool Gomoku::placePiece(int x, int y) {
   return true;
 }
 
-std::pair<int, int> Gomoku::placePiece() {
+std::pair<int, int> Gomoku::placePiece(int maxDepth) {
 
   int x;
   int y;
   int score;
-
+  transposition.clear();
   std::vector<std::thread> searcher;
   std::vector<std::future<ScoreXY>> results;
   auto t1 = std::chrono::high_resolution_clock::now();
-  for (int depth = 1; depth <= 4; depth++) {
+
+  // TODO: investigate other multithreading techniques
+  // as the current one does nothing
+  for (int depth = maxDepth; depth <= maxDepth; depth++) {
     std::promise<ScoreXY> r;
     results.emplace_back(r.get_future());
     searcher.emplace_back(
@@ -290,8 +293,9 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
       score = evalBoard(board, start, totalOdd) -
               evalBoard(board, opponent, !totalOdd);
     } else {
-      score = evalBoard(board, opponent, totalOdd) -
-              evalBoard(board, start, !totalOdd);
+      // odd step
+      score = evalBoard(board, opponent, !totalOdd) -
+              evalBoard(board, start, totalOdd);
     }
 
     STORERET(score);
