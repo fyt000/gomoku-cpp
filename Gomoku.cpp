@@ -149,21 +149,38 @@ int Gomoku::singlePieceEvaluation(Board &board, int x, int y, Piece player) {
 std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Board &board, Piece cur) {
   auto opponent = otherPlayer(cur);
   std::vector<ScoreXY> scores;
-  int minX = BOARDSIZE / 2;
-  int maxX = BOARDSIZE / 2 + 1;
-  int minY = BOARDSIZE / 2;
-  int maxY = BOARDSIZE / 2 + 1;
+
+#define SETNEW(val, newVal, maxFunc)                                           \
+  {                                                                            \
+    if (val == -1) {                                                           \
+      val = newVal;                                                            \
+    } else {                                                                   \
+      val = maxFunc(val, newVal);                                              \
+    }                                                                          \
+  }
+
+  int minX = -1;
+  int maxX = -1;
+  int minY = -1;
+  int maxY = -1;
   for (int x = 0; x < BOARDSIZE; x++) {
     for (int y = 0; y < BOARDSIZE; y++) {
       auto p = board.getPiece(x, y);
       if (p != Piece::EMPTY) {
-        minX = std::min(x, minX);
-        minY = std::min(y, minY);
-        maxX = std::max(x, maxX);
-        maxY = std::max(y, maxY);
+        SETNEW(minX, x, std::min);
+        SETNEW(minY, y, std::min);
+        SETNEW(maxX, x, std::max);
+        SETNEW(maxY, y, std::max);
       }
     }
   }
+  if (minX == -1 && maxX == -1 && minY == -1 && maxY == -1) {
+    minX = 7;
+    maxX = 7;
+    minY = 7;
+    maxY = 7;
+  }
+
   minX -= 2;
   maxX += 2;
   minY -= 2;
@@ -310,9 +327,9 @@ Gomoku::ScoreXY Gomoku::negaMax(Board &board, int depth, int alpha, int beta,
     auto nextScoreXY = negaMax(board, depth - 1, -1 * beta, -1 * alpha, start,
                                otherPlayer(next));
     int v = -1 * std::get<0>(nextScoreXY);
-    // if (depth == 4) {
-    //   std::cerr<<v<<std::endl;
-    //   std::cerr<<board;
+    // if (depth == 5) {
+    //   std::cerr << v << std::endl;
+    //   std::cerr << board;
     // }
 
     if (v > bestVal) {
