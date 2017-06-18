@@ -42,7 +42,7 @@ std::pair<int, int> Gomoku::placePiece(int maxDepth) {
   if (threaded) {
     // TODO: investigate other multithreading techniques
     // as the current one does nothing
-    for (int depth = maxDepth; depth <= maxDepth; depth++) {
+    for (int depth = 1; depth <= maxDepth; depth++) {
       std::promise<ScoreXY> r;
       results.emplace_back(r.get_future());
       searcher.emplace_back(
@@ -60,7 +60,7 @@ std::pair<int, int> Gomoku::placePiece(int maxDepth) {
     p = results.back().get();
 
   } else {
-    for (int depth = 1; depth <= maxDepth; depth++) {
+    for (int depth = maxDepth; depth <= maxDepth; depth++) {
       Board boardCopy(curBoard);
       p = negaScout(boardCopy, depth, -99999999, 99999999, turn, turn);
       // firstGuess = p;
@@ -280,14 +280,6 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
       }
     }
   }
-
-// ok how does the update work?
-// on a single thread
-// if not in table (find failure) - do whatever
-// tt in table but not enough depth
-// gets updated to the higher depth... (emplace does not update!)
-// so always update in single threaded!
-// nvm didn't seem to do a thing
 
 #define STORERET(score)                                                        \
   {                                                                            \
