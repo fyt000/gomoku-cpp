@@ -54,8 +54,13 @@ int main(int argc, char **argv) {
   }*/
   int steps = 0;
   while (!g->checkWinner()) {
-    //step 4 goes first vs step 5 going second
-    g->placePiece(5);
+    // step 4 goes first vs step 5 going second
+    if ((steps % 2) == 0) {
+      g->placePiece(5, true);
+    }
+    else {
+      g->placePiece(4, true);
+    }
     steps++;
     printBoard();
   }

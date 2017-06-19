@@ -26,17 +26,20 @@ bool Gomoku::placePiece(int x, int y) {
   return true;
 }
 
-std::pair<int, int> Gomoku::placePiece(int maxDepth) {
+std::pair<int, int> Gomoku::placePiece(int maxDepth, bool threaded) {
   // std::cout<<sizeof(curBoard)<<std::endl;
   int x;
   int y;
   int score;
   nodesVisited.store(0);
-  // transposition.clear();
+  {
+    std::lock_guard<std::mutex> lock(ttLock);
+    transposition.clear();
+  }
+  
 
   auto t1 = std::chrono::high_resolution_clock::now();
 
-  bool threaded = true;
   ScoreXY p;
   if (threaded) {
     p = multithreadSearch(curBoard, maxDepth, -99999999, 99999999, turn);
@@ -257,7 +260,7 @@ Gomoku::ScoreXY Gomoku::updateTTAndRet(Board &board, int score, int alpha,
 
 Gomoku::ScoreXY Gomoku::multithreadSearch(Board &board, int depth, int alpha,
                                           int beta, Piece start) {
-  int threadNum = 4;
+  int threadNum = 8;
   std::vector<std::thread> searcher;
   std::vector<std::future<ScoreXY>> results;
   auto moves = genBestMoves(board, start);
@@ -282,12 +285,13 @@ Gomoku::ScoreXY Gomoku::multithreadSearch(Board &board, int depth, int alpha,
   board.undoPiece(x, y);
   // update the new alpha
   alpha = std::max(alpha, v);
+  int startAt = 1;
 
   std::cerr << "start distributing work on "<<moves.size() << std::endl;
   int threadIdx = 0; 
   // distribute the work
   std::vector<std::vector<ScoreXY>> movesSplits(threadNum);
-  for (int i = 1; i < moves.size(); i++) {
+  for (int i = startAt; i < moves.size(); i++) {
     movesSplits[threadIdx++].push_back(moves[i]);
     threadIdx = threadIdx % threadNum;
   }
@@ -336,9 +340,10 @@ Gomoku::ScoreXY Gomoku::negaScoutWorker(Board &board, int depth, int alpha,
 
     int x = std::get<1>(scoreXY);
     int y = std::get<2>(scoreXY);
-    std::cerr << "doing work on " << x << " " << y << std::endl;
+    // std::cerr << "doing work on " << x << " " << y << std::endl;
     board.placePiece(x, y, next);
     ScoreXY nextScoreXY;
+
     // search with null window as alpha is already updated
     nextScoreXY = negaScout(board, depth - 1, -alpha - 1, -alpha, start,
                             otherPlayer(next));
@@ -347,7 +352,10 @@ Gomoku::ScoreXY Gomoku::negaScoutWorker(Board &board, int depth, int alpha,
       nextScoreXY =
           negaScout(board, depth - 1, -beta, -v, start, otherPlayer(next));
     }
-    v = -1 * std::get<0>(nextScoreXY);
+
+
+    // nextScoreXY = negaScout(board, depth - 1, -beta, -alpha, start, otherPlayer(next));
+    // int v = -1 * std::get<0>(nextScoreXY);
 
     if (v > bestVal) {
       bestX = x;

@@ -75,7 +75,7 @@ void getNextStep(http_request request) {
           }
         }
         g.setBoard(board);
-        nextXY = g.placePiece(5);
+        nextXY = g.placePiece(5, true);
 
       })
       .wait();

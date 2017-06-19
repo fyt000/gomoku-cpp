@@ -49,7 +49,7 @@ public:
   }
 
   bool placePiece(int x, int y);
-  std::pair<int, int> placePiece(int depth = 4);
+  std::pair<int, int> placePiece(int depth = 4, bool multithread = false);
   int checkWinner();
 
   friend std::ostream &operator<<(std::ostream &stream, const Gomoku &gomoku);
