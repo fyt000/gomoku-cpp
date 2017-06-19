@@ -97,6 +97,13 @@ private:
   std::vector<ScoreXY> genBestMoves(Board &board, Piece cur);
   ScoreXY negaScout(Board &board, int depth, int alpha, int beta, Piece start,
                   Piece next);
+  
+  ScoreXY negaScoutWorker(Board &board, int depth, int alpha, int beta,
+                                  Piece start, Piece next, const std::vector<ScoreXY>& moves);
+  
+  //evaluate the first position, then distribute the work to multiple threads
+  ScoreXY multithreadSearch(Board &board, int depth, int alpha, int beta, Piece start);
+
   int singlePieceWinner(Board &board, int x, int y);
 
   //
@@ -107,4 +114,6 @@ private:
       return true;
     return false;
   }
+
+  ScoreXY updateTTAndRet(Board& board, int score, int alpha, int beta, int depth, int bestX,int bestY);
 };

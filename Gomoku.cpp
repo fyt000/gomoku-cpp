@@ -18,7 +18,7 @@ Gomoku::Gomoku(const std::vector<int> &patternLookup1,
   wonScore = 2 * maxScore;
 }
 
-bool Gomoku::placePiece(int x,int y) {
+bool Gomoku::placePiece(int x, int y) {
   if (curBoard.getPiece(x, y) != Piece::EMPTY)
     return false;
   curBoard.placePiece(x, y, turn);
@@ -33,32 +33,13 @@ std::pair<int, int> Gomoku::placePiece(int maxDepth) {
   int score;
   nodesVisited.store(0);
   // transposition.clear();
-  std::vector<std::thread> searcher;
-  std::vector<std::future<ScoreXY>> results;
+
   auto t1 = std::chrono::high_resolution_clock::now();
 
   bool threaded = true;
   ScoreXY p;
   if (threaded) {
-    // TODO: investigate other multithreading techniques
-    // as the current one does nothing
-    for (int depth = 1; depth <= maxDepth; depth++) {
-      std::promise<ScoreXY> r;
-      results.emplace_back(r.get_future());
-      searcher.emplace_back(
-          [this, depth](std::promise<ScoreXY> &&r) {
-            Board boardCopy(curBoard);
-            auto p = negaScout(boardCopy, depth, -99999999, 99999999, turn, turn);
-            r.set_value(p);
-          },
-          std::move(r));
-    }
-    for (auto &t : searcher) {
-      t.join();
-    }
-    // only care about the last one for now
-    p = results.back().get();
-
+    p = multithreadSearch(curBoard, maxDepth, -99999999, 99999999, turn);
   } else {
     for (int depth = maxDepth; depth <= maxDepth; depth++) {
       Board boardCopy(curBoard);
@@ -248,8 +229,141 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Board &board, Piece cur) {
   return scores;
 }
 
+Gomoku::ScoreXY Gomoku::updateTTAndRet(Board &board, int score, int alpha,
+                                       int beta, int depth, int bestX,
+                                       int bestY) {
+  std::lock_guard<std::mutex> lock(ttLock);
+  auto ttEntryPair = transposition.find(board);
+  TType type;
+  if (score <= alpha) {
+    type = TType::LOWER;
+  } else if (score >= beta) {
+    type = TType::UPPER;
+  } else {
+    type = TType::EXACT;
+  }
+  if (ttEntryPair == transposition.end()) {
+    transposition[board] = TTEntry(score, type, depth);
+  } else {
+    auto &ttEntry = ttEntryPair->second;
+    if (ttEntry.depth < depth) {
+      ttEntry.type = type;
+      ttEntry.value = score;
+      ttEntry.depth = depth;
+    }
+  }
+  return std::make_tuple(score, bestX, bestY);
+}
+
+Gomoku::ScoreXY Gomoku::multithreadSearch(Board &board, int depth, int alpha,
+                                          int beta, Piece start) {
+  int threadNum = 4;
+  std::vector<std::thread> searcher;
+  std::vector<std::future<ScoreXY>> results;
+  auto moves = genBestMoves(board, start);
+
+  int bestX = -1;
+  int bestY = -1;
+  int bestVal = -99999999;
+
+  int x = std::get<1>(moves[0]);
+  int y = std::get<2>(moves[0]);
+  board.placePiece(x, y, start);
+  auto scoreXY =
+      negaScout(board, depth - 1, -beta, -alpha, start, otherPlayer(start));
+  board.undoPiece(x, y);
+  int v = -1 * std::get<0>(scoreXY);
+  if (v > bestVal) {
+    bestX = x;
+    bestY = y;
+    bestVal = v;
+  }
+
+  board.undoPiece(x, y);
+  // update the new alpha
+  alpha = std::max(alpha, v);
+
+  std::cerr << "start distributing work on "<<moves.size() << std::endl;
+  int threadIdx = 0; 
+  // distribute the work
+  std::vector<std::vector<ScoreXY>> movesSplits(threadNum);
+  for (int i = 1; i < moves.size(); i++) {
+    movesSplits[threadIdx++].push_back(moves[i]);
+    threadIdx = threadIdx % threadNum;
+  }
+
+  for (int i = 0; i < threadNum; i++) {
+    std::promise<ScoreXY> r;
+    results.emplace_back(r.get_future());
+    // make many copies
+    std::vector<ScoreXY> threadMoves(movesSplits[i]);
+    searcher.emplace_back(
+        [this, threadMoves, depth, alpha, beta, start](std::promise<ScoreXY> &&r) {
+          Board boardCopy(curBoard);
+          auto p = negaScoutWorker(boardCopy, depth, alpha, beta, start, start,
+                                   threadMoves);
+          r.set_value(p);
+        },
+        std::move(r));
+  }
+
+  for (auto &t : searcher) {
+    t.join();
+  }
+  for (auto &r : results) {
+    auto theMove = r.get();
+    if (std::get<0>(theMove) > bestVal) {
+      bestVal = std::get<0>(theMove);
+      bestX = std::get<1>(theMove);
+      bestY = std::get<2>(theMove);
+    }
+  }
+  // std::cout<<"placing on "<<bestX<<" "<<bestY<<std::endl;
+  return std::make_tuple(bestVal, bestX, bestY);
+}
+
+Gomoku::ScoreXY Gomoku::negaScoutWorker(Board &board, int depth, int alpha,
+                                        int beta, Piece start, Piece next,
+                                        const std::vector<ScoreXY> &moves) {
+  // no transposition look up
+  int bestX = -1;
+  int bestY = -1;
+  auto opponent = otherPlayer(start);
+  int bestVal = alpha;
+
+  ScoreXY nextScoreXY;
+  for (const auto &scoreXY : moves) {
+
+    int x = std::get<1>(scoreXY);
+    int y = std::get<2>(scoreXY);
+    std::cerr << "doing work on " << x << " " << y << std::endl;
+    board.placePiece(x, y, next);
+    ScoreXY nextScoreXY;
+    // search with null window as alpha is already updated
+    nextScoreXY = negaScout(board, depth - 1, -alpha - 1, -alpha, start,
+                            otherPlayer(next));
+    int v = -1 * std::get<0>(nextScoreXY);
+    if (alpha < v && v < beta) {
+      nextScoreXY =
+          negaScout(board, depth - 1, -beta, -v, start, otherPlayer(next));
+    }
+    v = -1 * std::get<0>(nextScoreXY);
+
+    if (v > bestVal) {
+      bestX = x;
+      bestY = y;
+      bestVal = v;
+    }
+    board.undoPiece(x, y);
+    alpha = std::max(alpha, v);
+    if (beta <= alpha)
+      break;
+  }
+  return updateTTAndRet(board, bestVal, alpha, beta, depth, bestX, bestY);
+}
+
 Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
-                                Piece start, Piece next) {
+                                  Piece start, Piece next) {
   int bestX = -1;
   int bestY = -1;
 
@@ -280,33 +394,6 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
       }
     }
   }
-
-#define STORERET(score)                                                        \
-  {                                                                            \
-    std::lock_guard<std::mutex> lock(ttLock);                                  \
-    auto ttEntryPair = transposition.find(board);                              \
-    TType type;                                                                \
-    if (score <= alpha) {                                                      \
-      type = TType::LOWER;                                                     \
-    } else if (score >= beta) {                                                \
-      type = TType::UPPER;                                                     \
-    } else {                                                                   \
-      type = TType::EXACT;                                                     \
-    }                                                                          \
-    if (ttEntryPair == transposition.end()) {                                  \
-      transposition[board] = TTEntry(score, TType::EXACT, depth);              \
-    } else {                                                                   \
-      auto &ttEntry = ttEntryPair->second;                                     \
-      if (ttEntry.depth <= depth) {                                            \
-        ttEntry.type = type;                                                   \
-        ttEntry.value = score;                                                 \
-      }                                                                        \
-    }                                                                          \
-    return std::make_tuple(score, bestX, bestY);                               \
-  }
-
-#define STORERETX(score)                                                       \
-  { return std::make_tuple(score, bestX, bestY); }
 
   auto opponent = otherPlayer(start);
 
@@ -340,7 +427,7 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
     // int coe = winner == (int)next ? 1 : -1;
     int coe = -1;
     score = maxScore * (depth + 1) * coe;
-    STORERET(score);
+    return updateTTAndRet(board, score, alpha, beta, depth, bestX, bestY);
   }
   if (depth == 0) {
     nodesVisited++;
@@ -358,7 +445,7 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
               evalBoard(board, start, totalOdd);
     }
 
-    STORERET(score);
+    return updateTTAndRet(board, score, alpha, beta, depth, bestX, bestY);
   }
 
   int bestVal = -99999999;
@@ -377,7 +464,7 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
       firstNode = false;
     } else {
       nextScoreXY = negaScout(board, depth - 1, -alpha - 1, -alpha, start,
-                            otherPlayer(next));
+                              otherPlayer(next));
       int v = -1 * std::get<0>(nextScoreXY);
       if (alpha < v && v < beta) {
         nextScoreXY =
@@ -401,7 +488,7 @@ Gomoku::ScoreXY Gomoku::negaScout(Board &board, int depth, int alpha, int beta,
       break;
   }
 
-  STORERET(bestVal);
+  return updateTTAndRet(board, bestVal, alpha, beta, depth, bestX, bestY);
 }
 
 int Gomoku::checkWinner() { checkWinner(curBoard); }
