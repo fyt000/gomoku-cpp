@@ -1,14 +1,15 @@
 #pragma once
 
-#include <vector>
 #include <map>
 #include <string>
+#include <vector>
 
-class RowEvaluator
-{
+class RowEvaluator {
 public:
   RowEvaluator();
-  void setPatterns(const std::string &patternFile, std::vector<int> &retRowEval1, std::vector<int> &retRowEval2);
+  void setPatterns(const std::string &patternFile,
+                   std::vector<int> &retRowEval1,
+                   std::vector<int> &retRowEval2);
 
 private:
   int genEvalForRow(int row, bool type);
