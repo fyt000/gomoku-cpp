@@ -6,9 +6,9 @@ namespace gomoku {
 
 BitRowBuilder::BitRowBuilder() = default;
 
-BitRowBuilder::BitRowBuilder(int row) : row(row), lenDirty(true) {}
+BitRowBuilder::BitRowBuilder(std::uint16_t row) : row(row), lenDirty(true) {}
 
-int BitRowBuilder::getRow() const
+std::uint16_t BitRowBuilder::getRow() const
 {
   return row;
 }
@@ -20,14 +20,17 @@ void BitRowBuilder::reset()
   lenDirty = false;
 }
 
-BitRowBuilder& BitRowBuilder::add(bool isEmpty)
+BitRowBuilder& BitRowBuilder::appendCell(bool isSelfStone)
 {
-  return add(isEmpty ? 0 : 1);
+  return appendBit(isSelfStone ? 1 : 0);
 }
 
-BitRowBuilder& BitRowBuilder::add(int bit)
+BitRowBuilder& BitRowBuilder::appendBit(int bit)
 {
-  row = (row << 1) | (bit & 1);
+  if (LengthOf(row) >= 15) {
+    return *this;
+  }
+  row = static_cast<std::uint16_t>((row << 1) | (bit & 1));
   lenDirty = true;
   return *this;
 }
@@ -49,26 +52,31 @@ void BitRowBuilder::inplaceReverse()
 
 bool BitRowBuilder::isSet(int index)
 {
-  return (row & (1 << (length() - 1 - index))) != 0;
+  const int rowLength = length();
+  return index >= 0 && index < rowLength &&
+         (row & (std::uint16_t{1} << (rowLength - 1 - index))) != 0;
 }
 
-bool BitRowBuilder::IsSet(int row, int index)
+bool BitRowBuilder::IsSet(std::uint16_t row, int index)
 {
-  return (row & (1 << (LengthOf(row) - 1 - index))) != 0;
+  const int rowLength = LengthOf(row);
+  return index >= 0 && index < rowLength &&
+         (row & (std::uint16_t{1} << (rowLength - 1 - index))) != 0;
 }
 
-int BitRowBuilder::RowSplice(int row, int index)
+std::uint16_t BitRowBuilder::RowSplice(std::uint16_t row, int index)
 {
   const int startLen = LengthOf(row);
-  row &= ~(1 << startLen);
-  for (int i = 0; i < index; ++i) {
-    row &= ~(1 << (startLen - 1 - i));
+  if (index < 0 || index > startLen) {
+    return row;
   }
-  row |= 1 << (startLen - index);
-  return row;
+  const int remaining = startLen - index;
+  const std::uint16_t remainingMask =
+      remaining == 0 ? 0 : static_cast<std::uint16_t>((std::uint32_t{1} << remaining) - 1);
+  return static_cast<std::uint16_t>((row & remainingMask) | (std::uint16_t{1} << remaining));
 }
 
-bool BitRowBuilder::RowStartsWith(int row, int pattern)
+bool BitRowBuilder::RowStartsWith(std::uint16_t row, std::uint16_t pattern)
 {
   const int rowLength = LengthOf(row) + 1;
   const int patternLength = LengthOf(pattern) + 1;
@@ -78,22 +86,23 @@ bool BitRowBuilder::RowStartsWith(int row, int pattern)
   return (row >> (rowLength - patternLength)) == pattern;
 }
 
-int BitRowBuilder::GetReverse(int row)
+std::uint16_t BitRowBuilder::GetReverse(std::uint16_t row)
 {
   const int rowLength = LengthOf(row);
-  int reversedRow = kEmptyRow;
+  std::uint16_t reversedRow = kEmptyRow;
   for (int i = 0; i < rowLength; ++i) {
-    reversedRow = (reversedRow << 1) | ((row & (1 << i)) != 0 ? 1 : 0);
+    reversedRow = static_cast<std::uint16_t>((reversedRow << 1) |
+                                             ((row & (std::uint16_t{1} << i)) != 0 ? 1 : 0));
   }
   return reversedRow;
 }
 
-int BitRowBuilder::LengthOf(int row)
+int BitRowBuilder::LengthOf(std::uint16_t row)
 {
   if (row == 0) {
     return 0;
   }
-  return static_cast<int>(std::bit_width(static_cast<unsigned int>(row))) - 1;
+  return static_cast<int>(std::bit_width(row)) - 1;
 }
 
 }  // namespace gomoku

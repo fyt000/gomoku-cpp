@@ -1,27 +1,38 @@
 #pragma once
 
-#include <map>
+#include <array>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "EvaluationTables.h"
 
 namespace gomoku {
 
 class RowEvaluator {
  public:
   RowEvaluator();
-  void setPatterns(const std::string& patternFile, std::vector<int>& rowEval1,
-                   std::vector<int>& rowEval2);
+  [[nodiscard]] EvaluationTablesPtr loadPatterns(const std::string& patternFile);
 
  private:
-  [[nodiscard]] int genEvalForRow(int row, bool type);
-  [[nodiscard]] int rowDP(int row, std::vector<int>& dp, int index, bool type);
-  [[nodiscard]] std::vector<int> initDP(int row) const;
+  struct PatternEvaluation {
+    std::uint16_t pattern = 0;
+    std::uint16_t reverse = 0;
+    std::uint8_t length = 0;
+    std::int32_t oddStep = 0;
+    std::int32_t evenStep = 0;
+  };
 
-  int maxPatLen = 0;
-  std::map<int, int> patternEvalMap1;
-  std::map<int, int> patternEvalMap2;
-  std::vector<int> rowEval1;
-  std::vector<int> rowEval2;
+  using RowDp = std::array<int, kMaximumEncodedRowLength + 1>;
+
+  [[nodiscard]] int genEvalForRow(std::uint16_t row, bool type);
+  [[nodiscard]] int rowDP(std::uint16_t row, RowDp& dp, int index, bool type);
+  [[nodiscard]] static RowDp initDP();
+  void reset();
+
+  std::vector<PatternEvaluation> patterns;
+  std::shared_ptr<EvaluationTables> tables;
 };
 
 }  // namespace gomoku

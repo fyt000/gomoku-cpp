@@ -2,34 +2,30 @@
 
 namespace gomoku {
 
-GameSession::GameSession(const std::vector<int>& patternLookup1,
-                         const std::vector<int>& patternLookup2)
-    : game(patternLookup1, patternLookup2)
+GameSession::GameSession(EvaluationTablesPtr evaluationTables) : game(std::move(evaluationTables))
 {
 }
 
 bool GameSession::placePiece(int x, int y)
 {
-  if (game.checkWinner() || game.isBoardFull() || !game.placePiece(x, y)) {
+  if (game.checkWinner() != Piece::EMPTY || game.isBoardFull() || !game.placePiece(x, y)) {
     return false;
   }
   moves.push_back({x, y});
-  rebuild();
   return true;
 }
 
-std::pair<int, int> GameSession::placeComputerMove()
+std::pair<int, int> GameSession::placeComputerMove(SearchOptions options)
 {
-  if (game.checkWinner() || game.isBoardFull()) {
+  if (game.checkWinner() != Piece::EMPTY || game.isBoardFull()) {
     return {-1, -1};
   }
 
-  const auto move = game.placePiece();
+  const auto move = game.placePiece(options);
   if (move.first < 0 || move.second < 0) {
     return move;
   }
   moves.push_back({move.first, move.second});
-  rebuild();
   return move;
 }
 
@@ -62,7 +58,7 @@ Piece GameSession::currentTurn() const
   return game.currentTurn();
 }
 
-int GameSession::checkWinner() const
+Piece GameSession::checkWinner() const
 {
   return game.checkWinner();
 }

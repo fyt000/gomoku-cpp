@@ -50,6 +50,16 @@ The command-line demo is also available as `gomoku-cpp.exe` and takes the same p
 
 The raylib GUI lets the player choose Black (first) or White (second), places black and white stones on a 15×15 grid, and retracts the last completed human/computer turn. It runs natively on Windows, macOS, and Linux (raylib's supported desktop platforms).
 
+The side-panel effort selector controls search depth, frontier radius, and root-search threading:
+
+- Light: depth 2, radius 2, one thread
+- Medium: depth 3, radius 2, one thread
+- High: depth 4, radius 2, one thread
+- Max: depth 5, radius 3, up to four threads
+- Ultra: depth 6, radius 3, up to eight threads
+
+Thread counts are limited by the available hardware. The GUI also copies `pattern.txt` beside the executable, so it can be launched without an explicit pattern-file argument.
+
 ### MCP server
 
 ```powershell

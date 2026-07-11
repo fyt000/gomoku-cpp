@@ -3,24 +3,25 @@
 #include <utility>
 #include <vector>
 
+#include "EvaluationTables.h"
 #include "Gomoku.h"
 
 namespace gomoku {
 
-// Owns user-facing game state. The engine is rebuilt from this move list after
-// each mutation, keeping undo and transport/UI concerns out of Gomoku itself.
+// Owns user-facing game state. Normal moves update the engine directly; undo
+// rebuilds it from this compact move history.
 class GameSession {
  public:
-  GameSession(const std::vector<int>& patternLookup1, const std::vector<int>& patternLookup2);
+  explicit GameSession(EvaluationTablesPtr evaluationTables);
 
   bool placePiece(int x, int y);
-  [[nodiscard]] std::pair<int, int> placeComputerMove();
+  [[nodiscard]] std::pair<int, int> placeComputerMove(SearchOptions options = {});
   int undo(int moves = 1);
   void reset();
 
   [[nodiscard]] Piece getPiece(int x, int y) const;
   [[nodiscard]] Piece currentTurn() const;
-  [[nodiscard]] int checkWinner() const;
+  [[nodiscard]] Piece checkWinner() const;
   [[nodiscard]] bool isBoardFull() const;
   [[nodiscard]] int moveCount() const;
 

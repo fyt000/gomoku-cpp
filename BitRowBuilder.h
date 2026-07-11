@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace gomoku {
 
 // The bit string starts with a sentinel 1, represents the evaluated player's
@@ -8,26 +10,26 @@ namespace gomoku {
 class BitRowBuilder {
  public:
   BitRowBuilder();
-  explicit BitRowBuilder(int row);
+  explicit BitRowBuilder(std::uint16_t row);
 
-  [[nodiscard]] int getRow() const;
+  [[nodiscard]] std::uint16_t getRow() const;
   void reset();
-  BitRowBuilder& add(bool isEmpty);
-  BitRowBuilder& add(int bit);
+  BitRowBuilder& appendCell(bool isSelfStone);
+  BitRowBuilder& appendBit(int bit);
   [[nodiscard]] bool isSet(int index);
   void inplaceReverse();
   [[nodiscard]] int length();
 
-  [[nodiscard]] static bool IsSet(int row, int index);
-  [[nodiscard]] static int RowSplice(int row, int index);
-  [[nodiscard]] static bool RowStartsWith(int row, int pattern);
-  [[nodiscard]] static int GetReverse(int row);
-  [[nodiscard]] static int LengthOf(int row);
+  [[nodiscard]] static bool IsSet(std::uint16_t row, int index);
+  [[nodiscard]] static std::uint16_t RowSplice(std::uint16_t row, int index);
+  [[nodiscard]] static bool RowStartsWith(std::uint16_t row, std::uint16_t pattern);
+  [[nodiscard]] static std::uint16_t GetReverse(std::uint16_t row);
+  [[nodiscard]] static int LengthOf(std::uint16_t row);
 
  private:
-  static constexpr int kEmptyRow = 1;
+  static constexpr std::uint16_t kEmptyRow = 1;
 
-  int row = kEmptyRow;
+  std::uint16_t row = kEmptyRow;
   int len = 0;
   bool lenDirty = false;
 };

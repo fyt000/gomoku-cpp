@@ -58,7 +58,7 @@ bool parseBoard(const httplib::Request& request, BoardCells& cells)
   for (int row = 0; row < kBoardSize; ++row) {
     for (int column = 0; column < kBoardSize; ++column) {
       const int value = payload.board[row * kBoardSize + column];
-      if (value < Piece::EMPTY || value > Piece::WHITE) {
+      if (value < static_cast<int>(Piece::EMPTY) || value > static_cast<int>(Piece::WHITE)) {
         return false;
       }
       cells[row][column] = static_cast<Piece>(value);
@@ -69,8 +69,7 @@ bool parseBoard(const httplib::Request& request, BoardCells& cells)
 
 template <typename Handler>
 void handleBoardRequest(const httplib::Request& request, httplib::Response& response,
-                        const std::vector<int>& patternEvals1,
-                        const std::vector<int>& patternEvals2, Handler&& handler)
+                        const EvaluationTablesPtr& evaluationTables, Handler&& handler)
 {
   BoardCells cells{};
   if (!parseBoard(request, cells)) {
@@ -86,7 +85,7 @@ void handleBoardRequest(const httplib::Request& request, httplib::Response& resp
     }
   }
 
-  Gomoku game(patternEvals1, patternEvals2);
+  Gomoku game(evaluationTables);
   game.setBoard(board);
   sendJson(response, handler(game));
 }
@@ -98,10 +97,8 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  std::vector<int> patternEvals1;
-  std::vector<int> patternEvals2;
   RowEvaluator rowEvaluator;
-  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
+  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
 
   httplib::Server server;
   const auto optionsHandler = [](const httplib::Request&, httplib::Response& response) {
@@ -111,18 +108,19 @@ int run(int argc, char** argv)
   server.Options("/api/iswinner/", optionsHandler);
   server.Options("/api/getnextmove/", optionsHandler);
 
-  server.Post("/api/iswinner/", [&patternEvals1, &patternEvals2](const httplib::Request& request,
-                                                                 httplib::Response& response) {
-    handleBoardRequest(request, response, patternEvals1, patternEvals2,
-                       [](Gomoku& game) { return WinnerResponse{.winner = game.checkWinner()}; });
-  });
-  server.Post("/api/getnextmove/", [&patternEvals1, &patternEvals2](const httplib::Request& request,
-                                                                    httplib::Response& response) {
-    handleBoardRequest(request, response, patternEvals1, patternEvals2, [](Gomoku& game) {
-      const auto [x, y] = game.placePiece();
-      return MoveResponse{.x = x, .y = y};
-    });
-  });
+  server.Post("/api/iswinner/",
+              [evaluationTables](const httplib::Request& request, httplib::Response& response) {
+                handleBoardRequest(request, response, evaluationTables, [](Gomoku& game) {
+                  return WinnerResponse{.winner = static_cast<int>(game.checkWinner())};
+                });
+              });
+  server.Post("/api/getnextmove/",
+              [evaluationTables](const httplib::Request& request, httplib::Response& response) {
+                handleBoardRequest(request, response, evaluationTables, [](Gomoku& game) {
+                  const auto [x, y] = game.placePiece();
+                  return MoveResponse{.x = x, .y = y};
+                });
+              });
 
   std::thread serverThread([&server] { server.listen("0.0.0.0", 5000); });
   std::cout << "Server listening on http://0.0.0.0:5000. Press Enter to exit.\n";

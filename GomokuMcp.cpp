@@ -69,7 +69,7 @@ Json gameState(const GameSession& game)
   state["board"] = board;
   state["currentTurn"] = pieceName(game.currentTurn());
   state["moveCount"] = game.moveCount();
-  const Piece winner = static_cast<Piece>(game.checkWinner());
+  const Piece winner = game.checkWinner();
   if (winner == Piece::EMPTY) {
     state["winner"] = nullptr;
   } else {
@@ -194,7 +194,7 @@ Json runTool(GameSession& game, std::string_view name, const Json* arguments)
         !readInteger(field(*arguments, "y"), y)) {
       return textError("play_move requires integer x and y coordinates.");
     }
-    if (game.checkWinner() || game.isBoardFull()) {
+    if (game.checkWinner() != Piece::EMPTY || game.isBoardFull()) {
       return textError("The game is already finished. Call new_game to start again.");
     }
     if (!game.placePiece(x, y)) {
@@ -203,7 +203,7 @@ Json runTool(GameSession& game, std::string_view name, const Json* arguments)
     return textResult(gameState(game));
   }
   if (name == "computer_move") {
-    if (game.checkWinner() || game.isBoardFull()) {
+    if (game.checkWinner() != Piece::EMPTY || game.isBoardFull()) {
       return textError("The game is already finished. Call new_game to start again.");
     }
     const auto [x, y] = game.placeComputerMove();
@@ -284,11 +284,9 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  std::vector<int> patternEvals1;
-  std::vector<int> patternEvals2;
   RowEvaluator rowEvaluator;
-  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
-  GameSession game(patternEvals1, patternEvals2);
+  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
+  GameSession game(evaluationTables);
 
   std::string line;
   while (std::getline(std::cin, line)) {

@@ -7,12 +7,16 @@
 #undef WHITE
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -37,6 +41,9 @@ constexpr float kButtonWidth = 230.0F;
 constexpr float kFirstButtonTop = 620.0F;
 constexpr float kSecondButtonTop = 675.0F;
 constexpr float kButtonHeight = 46.0F;
+constexpr float kEffortTop = 184.0F;
+constexpr float kEffortArrowWidth = 46.0F;
+constexpr float kEffortValueWidth = kButtonWidth - 2.0F * kEffortArrowWidth;
 constexpr Color kBoardColor{222, 179, 104, 255};
 constexpr Color kPanelColor{35, 43, 54, 255};
 constexpr Color kAccentColor{85, 174, 128, 255};
@@ -45,6 +52,35 @@ struct LastComputerMove {
   int row = -1;
   int column = -1;
 };
+
+enum class Effort : int { LIGHT, MEDIUM, HIGH, MAX, ULTRA };
+
+struct EffortPreset {
+  const char* name;
+  int depth;
+  int frontierRadius;
+  unsigned int maximumThreads;
+};
+
+constexpr EffortPreset kEffortPresets[] = {{"Light", 2, 2, 1},
+                                           {"Medium", 3, 2, 1},
+                                           {"High", 4, 2, 1},
+                                           {"Max", 5, 3, 4},
+                                           {"Ultra", 6, 3, 8}};
+
+const EffortPreset& effortPreset(Effort effort)
+{
+  return kEffortPresets[static_cast<int>(effort)];
+}
+
+SearchOptions effortSearchOptions(Effort effort)
+{
+  const EffortPreset& preset = effortPreset(effort);
+  const unsigned int hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
+  return {.depth = preset.depth,
+          .frontierRadius = preset.frontierRadius,
+          .threadCount = std::min(preset.maximumThreads, hardwareThreads)};
+}
 
 const char* pieceName(Piece piece)
 {
@@ -69,8 +105,8 @@ std::string coordinateName(int row, int column)
 
 void logMove(const char* player, Piece piece, int row, int column)
 {
-  std::cout << player << " (" << pieceName(piece) << ") played "
-            << coordinateName(row, column) << " (row " << row << ", column " << column << ")\n"
+  std::cout << player << " (" << pieceName(piece) << ") played " << coordinateName(row, column)
+            << " (row " << row << ", column " << column << ")\n"
             << std::flush;
 }
 
@@ -92,6 +128,60 @@ void drawButton(Rectangle bounds, const char* label, bool enabled = true)
            static_cast<int>(bounds.y + (bounds.height - 20.0F) / 2.0F), 20, RAYWHITE);
 }
 
+struct EffortSelectorBounds {
+  Rectangle previous;
+  Rectangle value;
+  Rectangle next;
+};
+
+EffortSelectorBounds effortSelectorBounds()
+{
+  return {
+      .previous = {kButtonLeft, kEffortTop, kEffortArrowWidth, kButtonHeight},
+      .value = {kButtonLeft + kEffortArrowWidth, kEffortTop, kEffortValueWidth, kButtonHeight},
+      .next = {kButtonLeft + kEffortArrowWidth + kEffortValueWidth, kEffortTop, kEffortArrowWidth,
+               kButtonHeight},
+  };
+}
+
+void updateEffortSelector(Effort& effort, bool enabled)
+{
+  const EffortSelectorBounds bounds = effortSelectorBounds();
+  int index = static_cast<int>(effort);
+  if (buttonClicked(bounds.previous, enabled && index > 0)) {
+    effort = static_cast<Effort>(index - 1);
+  } else if (buttonClicked(bounds.next,
+                           enabled && index + 1 < static_cast<int>(std::size(kEffortPresets)))) {
+    effort = static_cast<Effort>(index + 1);
+  }
+}
+
+void drawEffortSelector(Effort effort, bool enabled)
+{
+  const EffortSelectorBounds bounds = effortSelectorBounds();
+  const int index = static_cast<int>(effort);
+  const EffortPreset& preset = effortPreset(effort);
+  const SearchOptions options = effortSearchOptions(effort);
+
+  DrawText("Effort", static_cast<int>(kButtonLeft), static_cast<int>(kEffortTop - 28.0F), 18,
+           Color{200, 207, 216, 255});
+  drawButton(bounds.previous, "<", enabled && index > 0);
+  drawButton(bounds.next, ">", enabled && index + 1 < static_cast<int>(std::size(kEffortPresets)));
+
+  DrawRectangleRec(bounds.value, enabled ? Color{47, 56, 68, 255} : Color{67, 73, 81, 255});
+  DrawRectangleLinesEx(bounds.value, 1.0F, Color{220, 225, 230, 255});
+  const int nameWidth = MeasureText(preset.name, 20);
+  DrawText(preset.name, static_cast<int>(bounds.value.x + (bounds.value.width - nameWidth) / 2.0F),
+           static_cast<int>(bounds.value.y + 13.0F), 20, RAYWHITE);
+
+  std::string details = "Depth " + std::to_string(options.depth) + "  |  Radius " +
+                        std::to_string(options.frontierRadius) + "  |  " +
+                        std::to_string(options.threadCount) +
+                        (options.threadCount == 1 ? " thread" : " threads");
+  DrawText(details.c_str(), static_cast<int>(kButtonLeft), static_cast<int>(kEffortTop + 57.0F), 14,
+           Color{170, 179, 190, 255});
+}
+
 void drawThinking(float x, float y)
 {
   constexpr const char* kLabel = "Thinking";
@@ -110,7 +200,7 @@ void drawThinking(float x, float y)
 
 void drawWinningPieces(const GameSession& game)
 {
-  const Piece winner = static_cast<Piece>(game.checkWinner());
+  const Piece winner = game.checkWinner();
   if (winner == Piece::EMPTY) {
     return;
   }
@@ -129,8 +219,8 @@ void drawWinningPieces(const GameSession& game)
         }
 
         int lineLength = 0;
-        while (game.getPiece(row + lineLength * deltaRow,
-                             column + lineLength * deltaColumn) == winner) {
+        while (game.getPiece(row + lineLength * deltaRow, column + lineLength * deltaColumn) ==
+               winner) {
           ++lineLength;
         }
         if (lineLength < 5) {
@@ -161,8 +251,7 @@ void drawBoard(const GameSession& game, const LastComputerMove& lastComputerMove
     const std::string rowLabel = std::to_string(kBoardSize - index);
     const int columnLabelWidth = MeasureText(columnLabel.c_str(), 14);
     const int rowLabelWidth = MeasureText(rowLabel.c_str(), 14);
-    DrawText(columnLabel.c_str(),
-             static_cast<int>(kBoardLeft + offset - columnLabelWidth / 2.0F),
+    DrawText(columnLabel.c_str(), static_cast<int>(kBoardLeft + offset - columnLabelWidth / 2.0F),
              static_cast<int>(kBoardTop - 19.0F), 14, Color{76, 56, 34, 255});
     DrawText(rowLabel.c_str(), static_cast<int>(kBoardLeft - 9.0F - rowLabelWidth),
              static_cast<int>(kBoardTop + offset - 7.0F), 14, Color{76, 56, 34, 255});
@@ -207,7 +296,7 @@ void drawBoard(const GameSession& game, const LastComputerMove& lastComputerMove
 
 void setStatusForGame(const GameSession& game, Piece human, std::string& status)
 {
-  const Piece winner = static_cast<Piece>(game.checkWinner());
+  const Piece winner = game.checkWinner();
   if (winner != Piece::EMPTY) {
     status = winner == human ? "You win!" : "Computer wins.";
   } else if (game.isBoardFull()) {
@@ -220,16 +309,18 @@ void setStatusForGame(const GameSession& game, Piece human, std::string& status)
 }
 
 void startComputerMove(const GameSession& game, Piece human, std::string& status,
-                       std::future<std::pair<int, int>>& pendingMove, bool& computerThinking)
+                       std::future<std::pair<int, int>>& pendingMove, bool& computerThinking,
+                       SearchOptions searchOptions)
 {
-  if (game.checkWinner() || game.isBoardFull() || game.currentTurn() == human) {
+  if (game.checkWinner() != Piece::EMPTY || game.isBoardFull() || game.currentTurn() == human) {
     setStatusForGame(game, human, status);
     return;
   }
 
   GameSession snapshot = game;
-  pendingMove = std::async(std::launch::async,
-                           [snapshot]() mutable { return snapshot.placeComputerMove(); });
+  pendingMove = std::async(std::launch::async, [snapshot, searchOptions]() mutable {
+    return snapshot.placeComputerMove(searchOptions);
+  });
   computerThinking = true;
   status = "Thinking";
 }
@@ -257,7 +348,7 @@ void collectComputerMove(GameSession& game, Piece human, std::string& status,
 
 void startGame(GameSession& game, Piece human, std::string& status,
                std::future<std::pair<int, int>>& pendingMove, bool& computerThinking,
-               LastComputerMove& lastComputerMove)
+               LastComputerMove& lastComputerMove, SearchOptions searchOptions)
 {
   game.reset();
   lastComputerMove = {};
@@ -265,7 +356,7 @@ void startGame(GameSession& game, Piece human, std::string& status,
             << ". Move notation uses A-O and 1-15; zero-based row and column follow.\n"
             << std::flush;
   setStatusForGame(game, human, status);
-  startComputerMove(game, human, status, pendingMove, computerThinking);
+  startComputerMove(game, human, status, pendingMove, computerThinking, searchOptions);
 }
 
 void returnToSideSelection(GameSession& game, bool& gameStarted, std::string& status,
@@ -302,9 +393,11 @@ bool boardClickCoordinates(int& row, int& column)
 }
 
 bool boardClickToMove(GameSession& game, Piece human, bool gameStarted, std::string& status,
-                      std::future<std::pair<int, int>>& pendingMove, bool& computerThinking)
+                      std::future<std::pair<int, int>>& pendingMove, bool& computerThinking,
+                      SearchOptions searchOptions)
 {
-  if (!gameStarted || game.currentTurn() != human || game.checkWinner() || game.isBoardFull()) {
+  if (!gameStarted || game.currentTurn() != human || game.checkWinner() != Piece::EMPTY ||
+      game.isBoardFull()) {
     return false;
   }
 
@@ -320,7 +413,7 @@ bool boardClickToMove(GameSession& game, Piece human, bool gameStarted, std::str
   }
 
   logMove("You", human, row, column);
-  startComputerMove(game, human, status, pendingMove, computerThinking);
+  startComputerMove(game, human, status, pendingMove, computerThinking, searchOptions);
   return true;
 }
 
@@ -351,18 +444,20 @@ bool canRetract(const GameSession& game, Piece human)
 
 int run(int argc, char** argv)
 {
-  if (argc != 2) {
-    TraceLog(LOG_ERROR, "Usage: gomoku-gui <pattern-file>");
+  if (argc > 2) {
+    TraceLog(LOG_ERROR, "Usage: gomoku-gui [pattern-file]");
     return 1;
   }
 
-  std::vector<int> patternEvals1;
-  std::vector<int> patternEvals2;
   RowEvaluator rowEvaluator;
-  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
-  GameSession game(patternEvals1, patternEvals2);
+  const std::filesystem::path patternFile =
+      argc == 2 ? std::filesystem::path(argv[1])
+                : std::filesystem::path(argv[0]).parent_path() / "pattern.txt";
+  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(patternFile.string());
+  GameSession game(evaluationTables);
 
   Piece human = Piece::BLACK;
+  Effort effort = Effort::HIGH;
   bool gameStarted = false;
   bool computerThinking = false;
   std::future<std::pair<int, int>> pendingComputerMove;
@@ -376,23 +471,26 @@ int run(int argc, char** argv)
     const Rectangle secondButton{kButtonLeft, kSecondButtonTop, kButtonWidth, kButtonHeight};
     collectComputerMove(game, human, status, pendingComputerMove, computerThinking,
                         lastComputerMove);
+    updateEffortSelector(effort, !computerThinking);
     if (!gameStarted) {
       if (buttonClicked(firstButton)) {
         human = Piece::BLACK;
         gameStarted = true;
-        startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove);
+        startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
+                  effortSearchOptions(effort));
       } else if (buttonClicked(secondButton)) {
         human = Piece::WHITE;
         gameStarted = true;
-        startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove);
+        startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
+                  effortSearchOptions(effort));
       } else {
         int row = 0;
         int column = 0;
         if (boardClickCoordinates(row, column)) {
           human = Piece::BLACK;
           gameStarted = true;
-          startGame(game, human, status, pendingComputerMove, computerThinking,
-                    lastComputerMove);
+          startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
+                    effortSearchOptions(effort));
         }
       }
     } else {
@@ -403,8 +501,8 @@ int run(int argc, char** argv)
         returnToSideSelection(game, gameStarted, status, lastComputerMove);
       }
     }
-    (void)boardClickToMove(game, human, gameStarted, status, pendingComputerMove,
-                           computerThinking);
+    (void)boardClickToMove(game, human, gameStarted, status, pendingComputerMove, computerThinking,
+                           effortSearchOptions(effort));
 
     BeginDrawing();
     ClearBackground(Color{240, 242, 245, 255});
@@ -417,13 +515,14 @@ int run(int argc, char** argv)
     } else {
       DrawText(status.c_str(), 760, 84, 22, RAYWHITE);
     }
-    const Piece winner = static_cast<Piece>(game.checkWinner());
+    const Piece winner = game.checkWinner();
     const char* hint = !gameStarted ? "Black moves first."
                        : winner != Piece::EMPTY || game.isBoardFull()
                            ? "Start a new game to play again."
                        : computerThinking ? "Your move is on the board."
-                                         : "Click board to play.";
+                                          : "Click board to play.";
     DrawText(hint, 760, 120, 17, Color{185, 194, 202, 255});
+    drawEffortSelector(effort, !computerThinking);
     if (gameStarted) {
       drawButton(firstButton, "Retract turn", !computerThinking && canRetract(game, human));
       drawButton(secondButton, "New game", !computerThinking);

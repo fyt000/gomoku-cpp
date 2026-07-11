@@ -1,7 +1,6 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
-#include <vector>
 
 #include "Gomoku.h"
 #include "RowEvaluator.h"
@@ -25,15 +24,13 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  std::vector<int> patternEvals1;
-  std::vector<int> patternEvals2;
   RowEvaluator rowEvaluator;
-  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
+  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
 
-  Gomoku game(patternEvals1, patternEvals2);
+  Gomoku game(evaluationTables);
   printBoard(game);
 
-  while (!game.checkWinner()) {
+  while (game.checkWinner() == Piece::EMPTY) {
     (void)game.placePiece();
     printBoard(game);
   }
