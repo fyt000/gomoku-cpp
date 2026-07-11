@@ -1,75 +1,56 @@
-#include <iostream>
 #include <cstdlib>
-#include <string>
-#include "Gomoku.h"
-#include <fstream>
+#include <exception>
+#include <iostream>
 #include <vector>
+
+#include "Gomoku.h"
 #include "RowEvaluator.h"
 
-//PLAN:
-//1. make AI work
-//2. multithreading on top of AI
-//3. protobuf/thrift for interprocess communicating (self-learn), and web interface
+namespace gomoku::driver {
 
-
-// focus on getting stuff done
-// will refactor later
-
-Gomoku* g;
-
-void printBoard() {
-
+void printBoard(const Gomoku& game)
+{
 #if defined(_WIN32)
-	system("cls");
+  std::system("cls");
 #else
-	system("clear");
+  std::system("clear");
 #endif
-	std::cout << *g << std::endl;
+  std::cout << game << '\n';
 }
 
-int main(int argc, char** argv) {
-	if (argc != 2) {
-		std::cerr << "need paths to row eval results" << std::endl;
-		return 0;
-	}
+int run(int argc, char** argv)
+{
+  if (argc != 2) {
+    std::cerr << "Usage: gomoku-cpp <pattern-file>\n";
+    return 1;
+  }
 
-	std::vector<int> patternEvals1;
-	std::vector<int> patternEvals2;
+  std::vector<int> patternEvals1;
+  std::vector<int> patternEvals2;
+  RowEvaluator rowEvaluator;
+  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
 
-	RowEvaluator rowEvaluator;
-	rowEvaluator.setPatterns(argv[1],patternEvals1,patternEvals2);
+  Gomoku game(patternEvals1, patternEvals2);
+  printBoard(game);
 
-	g = new Gomoku(patternEvals1, patternEvals2);
-	printBoard();
-	
-	/*
-	int x, y;
-	while (std::cin>>x>>y) {
-		if (g->placePiece(x, y)) {
-			printBoard();
-			if (g->checkWinner()) {
-				break;
-			}
-			std::cout << "AI thinking, please wait..." << std::endl;
-			g->placePiece();
-			printBoard();
-			if (g->checkWinner()) {
-				break;
-			}
-		}
-		else {
-			std::cout << "Already occupied, try again" << std::endl;
-		}
-	}*/
+  while (!game.checkWinner()) {
+    (void)game.placePiece();
+    printBoard(game);
+  }
 
-	
-	while (!g->checkWinner()) {
-		g->placePiece();
-		printBoard();
-	}
-	
-	delete g;
-	std::cout << "Press anykey to exit";
-	std::cin.get(); //the enter key from previous input
-	std::cin.get();
+  std::cout << "Press Enter to exit.";
+  std::cin.get();
+  return 0;
+}
+
+}  // namespace gomoku::driver
+
+int main(int argc, char** argv)
+{
+  try {
+    return gomoku::driver::run(argc, argv);
+  } catch (const std::exception& error) {
+    std::cerr << "Error: " << error.what() << '\n';
+    return 1;
+  }
 }

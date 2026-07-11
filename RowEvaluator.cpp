@@ -1,147 +1,122 @@
-#include <iostream>
-#include "BitRowBuilder.h"
-#include <string>
-#include <map>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <algorithm>
 #include "RowEvaluator.h"
 
-using namespace std;
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
 
-RowEvaluator::RowEvaluator() {
-	rowEval1 = vector<int>(1 << 16, -1);
-	rowEval2 = vector<int>(1 << 16, -1);
+#include "BitRowBuilder.h"
+
+namespace gomoku {
+
+RowEvaluator::RowEvaluator() : rowEval1(1 << 16, -1), rowEval2(1 << 16, -1) {}
+
+std::vector<int> RowEvaluator::initDP(int row) const
+{
+  std::vector<int> dp(BitRowBuilder::LengthOf(row), -1);
+  dp.insert(dp.end(), maxPatLen, 0);
+  return dp;
 }
 
-vector<int> RowEvaluator::initDP(int row) {
-	int len = BitRowBuilder::LengthOf(row);
-	vector<int> dp(len, -1);
-	for (int i = 0; i < maxPatLen; i++) {
-		dp.push_back(0);
-	}
-	return dp;
+int RowEvaluator::rowDP(int row, std::vector<int>& dp, int index, bool type)
+{
+  int currentMax = 0;
+  BitRowBuilder rowBuilder(row);
+  if (rowBuilder.length() < 2) {
+    dp[index] = 0;
+    return 0;
+  }
+  if (dp[index] != -1) {
+    return dp[index];
+  }
+
+  if (!rowBuilder.isSet(0) && !rowBuilder.isSet(1)) {
+    return rowDP(BitRowBuilder::RowSplice(row, 1), dp, index + 1, type);
+  }
+
+  const std::map<int, int>& evaluationMap = type ? patternEvalMap1 : patternEvalMap2;
+  for (const auto& [pattern, patternEvaluation] : evaluationMap) {
+    const int patternLength = BitRowBuilder::LengthOf(pattern);
+    if (BitRowBuilder::RowStartsWith(row, pattern)) {
+      const int value = patternEvaluation + rowDP(BitRowBuilder::RowSplice(row, patternLength), dp,
+                                                  index + patternLength, type);
+      currentMax = std::max(value, currentMax);
+    }
+    const int reversePattern = BitRowBuilder::GetReverse(pattern);
+    if (BitRowBuilder::RowStartsWith(row, reversePattern)) {
+      const int value = patternEvaluation + rowDP(BitRowBuilder::RowSplice(row, patternLength), dp,
+                                                  index + patternLength, type);
+      currentMax = std::max(value, currentMax);
+    }
+  }
+
+  const int value = rowDP(BitRowBuilder::RowSplice(row, 1), dp, index + 1, type);
+  currentMax = std::max(value, currentMax);
+  dp[index] = currentMax;
+  return currentMax;
 }
 
-// optimize for a for loop version?
-int RowEvaluator::rowDP(int row,vector<int>& dp,int idx,bool type) {
-	int curMax = 0;
-	BitRowBuilder rowBuilder(row);
-	
-	//assuming the shortest pattern has length 2
-	if (rowBuilder.length() < 2) {
-		dp[idx] = 0;
-		return 0;
-	}
-	if (dp[idx] != -1)
-		return dp[idx];
+int RowEvaluator::genEvalForRow(int row, bool type)
+{
+  const auto saveResult = [this, row, type](int value) {
+    (type ? rowEval1 : rowEval2)[row] = value;
+    return value;
+  };
 
-	if (!rowBuilder.isSet(0) && !rowBuilder.isSet(1)) {
-		return rowDP(BitRowBuilder::RowSplice(row, 1), dp, idx + 1, type);
-	}
+  if (row <= (1 << 5)) {
+    return saveResult(0);
+  }
+  for (int i = 1; i < 17; ++i) {
+    if (row == (1 << i)) {
+      return saveResult(0);
+    }
+  }
 
-	map<int, int>& evalMap = type ? patternEvalMap1 : patternEvalMap2;
+  const int reverseRow = BitRowBuilder::GetReverse(row);
+  const std::vector<int>& evaluations = type ? rowEval1 : rowEval2;
+  if (evaluations[reverseRow] != -1) {
+    return saveResult(evaluations[reverseRow]);
+  }
 
-	for (auto& kvp : evalMap) {
-		int pattern = kvp.first;
-		int patternEval = kvp.second;
-		int patternLen = BitRowBuilder::LengthOf(pattern);
-		if (BitRowBuilder::RowStartsWith(row, pattern)) {
-			int curVal = patternEval +
-				rowDP(BitRowBuilder::RowSplice(row, patternLen), dp, idx + patternLen, type);
-			curMax = max(curVal, curMax);
-		}
-		int reversePattern = BitRowBuilder::GetReverse(pattern);
-		if (BitRowBuilder::RowStartsWith(row, reversePattern)) {
-			int curVal = patternEval +
-				rowDP(BitRowBuilder::RowSplice(row, patternLen), dp, idx + patternLen, type);
-			curMax = max(curVal, curMax);
-		}
-	}
-
-	int curVal = rowDP(BitRowBuilder::RowSplice(row, 1), dp, idx + 1, type);
-	curMax = max(curVal, curMax);
-
-	dp[idx] = curMax;
-
-	return curMax;
+  auto forwardDP = initDP(row);
+  auto backwardDP = initDP(reverseRow);
+  const int forwardEval = rowDP(row, forwardDP, 0, type);
+  const int backwardEval = rowDP(reverseRow, backwardDP, 0, type);
+  return saveResult(std::max(forwardEval, backwardEval));
 }
 
+void RowEvaluator::setPatterns(const std::string& patternFile, std::vector<int>& outputRowEval1,
+                               std::vector<int>& outputRowEval2)
+{
+  std::ifstream input(patternFile);
+  if (!input) {
+    throw std::runtime_error("Unable to open pattern file: " + patternFile);
+  }
 
+  std::string line;
+  while (std::getline(input, line)) {
+    std::istringstream lineStream(line);
+    std::string pattern;
+    int eval1 = 0;
+    int eval2 = 0;
+    if (!(lineStream >> pattern >> eval1 >> eval2)) {
+      continue;
+    }
 
-int RowEvaluator::genEvalForRow(int row, bool type) {
+    pattern.insert(pattern.begin(), '1');
+    maxPatLen = std::max(maxPatLen, static_cast<int>(pattern.size()) - 1);
+    const int encodedPattern = std::stoi(pattern, nullptr, 2);
+    patternEvalMap1[encodedPattern] = eval1;
+    patternEvalMap2[encodedPattern] = eval2;
+  }
 
-#define SAVERET(r) {type?rowEval1[row]=r:rowEval2[row]=r; return r;}
+  for (int row = 0; row < (1 << 16); ++row) {
+    (void)genEvalForRow(row, true);
+    (void)genEvalForRow(row, false);
+  }
 
-	if (row <= (1 << 5)) {
-		SAVERET(0);
-	}
-	for (int i = 1; i < 17; i++) {
-		if (row == (1 << i)){
-			SAVERET(0);
-		}
-	}
-
-	//reverse row has the same eval
-	int revRow = BitRowBuilder::GetReverse(row);
-	if (type) {
-		if (rowEval1[revRow] != -1) {
-			SAVERET(rowEval1[revRow]);
-		}
-	}
-	if (!type) {
-		if (rowEval2[revRow] != -1) {
-			SAVERET(rowEval2[revRow]);
-		}
-	}
-
-	auto forwardDP = initDP(row);
-	auto backwardDP = initDP(revRow);
-
-	int forwardEval = rowDP(row, forwardDP, 0, type);
-	int backwardEval = rowDP(revRow, backwardDP, 0, type);
-
-	int ret = max(forwardEval, backwardEval);
-
-	SAVERET(ret);
+  outputRowEval1 = rowEval1;
+  outputRowEval2 = rowEval2;
 }
 
-
-void RowEvaluator::setPatterns(const string& patternFile, vector<int>& retRowEval1, vector<int>& retRowEval2) {
-	
-
-	//cout << "Evaluating..." << endl;
-	ifstream fin(patternFile);
-	string pattern;
-	int eval1;
-	int eval2;
-	string line;
-	while (getline(fin,line)) {
-		stringstream ss;
-		ss << line;
-		ss >> pattern;
-		ss >> eval1;
-		ss >> eval2;
-
-		//add 1 so leading 0 don't get thrown away
-		//because they do matter
-		pattern = "1" + pattern;
-
-		maxPatLen = max(maxPatLen, (int)pattern.size() - 1);
-
-		int intPat = std::stoi(pattern, nullptr, 2);
-		patternEvalMap1[intPat]= eval1;
-		patternEvalMap2[intPat]= eval2;
-	}
-
-
-	for (int i = 0; i < (1 << 16); i++) {
-		genEvalForRow(i, true);
-		genEvalForRow(i, false);
-	}
-
-	retRowEval1 = rowEval1;
-	retRowEval2 = rowEval2;
-
-}
+}  // namespace gomoku

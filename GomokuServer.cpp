@@ -1,123 +1,146 @@
-#include <cpprest/http_listener.h>
-#include <cpprest/json.h>
-#include <cpprest/uri.h>
+#include <httplib.h>
+
+#include <array>
+#include <exception>
+#include <glaze/glaze.hpp>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "Gomoku.h"
 #include "RowEvaluator.h"
 
-using namespace web;
-using namespace web::http;
-using namespace web::http::experimental::listener;
+namespace gomoku::server {
 
-#include <iostream>
-#include <map>
-#include <set>
-#include <string>
+using BoardCells = std::array<std::array<Piece, kBoardSize>, kBoardSize>;
 
-using namespace std;
+struct BoardRequest {
+  std::vector<int> board;
+};
 
-std::vector<int> patternEvals1;
-std::vector<int> patternEvals2;
+struct WinnerResponse {
+  int winner;
+};
 
-void defaultOption(http_request request)
+struct MoveResponse {
+  int x;
+  int y;
+};
+
+void setCorsHeaders(httplib::Response& response)
 {
-	http_response response(status_codes::OK);
-	response.headers().add(U("Allow"), U("POST, OPTIONS"));
-	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
-	response.headers().add(U("Access-Control-Allow-Methods"), U("POST, OPTIONS"));
-	response.headers().add(U("Access-Control-Allow-Headers"), U("Content-Type"));
-	request.reply(response);
+  response.set_header("Access-Control-Allow-Origin", "*");
+  response.set_header("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.set_header("Access-Control-Allow-Headers", "Content-Type");
 }
 
-
-void isWinnerCheck(http_request request)
+template <typename Payload>
+void sendJson(httplib::Response& response, const Payload& payload)
 {
-	cerr << "receiving post request" << endl;
-	Gomoku g(patternEvals1, patternEvals2);
-	int result = 0;
-	request.extract_json().then([&g,&result](pplx::task<json::value> task) {
-			//I hate json and every json library
-			//protobuf when?
-			const auto& jsonMap = task.get();
-			auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
-			Piece board[BOARDSIZE][BOARDSIZE];
-			for (int i = 0; i < BOARDSIZE; i++) {
-			for (int j = 0; j < BOARDSIZE; j++) {
-			board[i][j] = (Piece) boardArray.at(i*BOARDSIZE + j).as_integer();
-			}
-			}
-			g.setBoard(board);
-			result = g.checkWinner();
-			}).wait();
-
-	auto responseJson = json::value::object();
-	responseJson[utility::conversions::to_utf8string("winner")] = result;
-	http_response response(status_codes::OK);
-	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
-	response.set_body(responseJson);
-	request.reply(response);
+  std::string body;
+  if (glz::write_json(payload, body)) {
+    response.status = 500;
+    return;
+  }
+  setCorsHeaders(response);
+  response.set_content(body, "application/json");
 }
 
-void getNextStep(http_request request)
+bool parseBoard(const httplib::Request& request, BoardCells& cells)
 {
-	cerr << "receiving getNextStep request" << endl;
-	Gomoku g(patternEvals1, patternEvals2);
-	pair<int, int> nextXY;
-	request.extract_json().then([&g, &nextXY](pplx::task<json::value> task) {
-			//I hate json and every json library
-			//protobuf when?
-			const auto& jsonMap = task.get();
-			auto& boardArray = jsonMap.at(utility::conversions::to_utf8string("board")).as_array();
-			Piece board[BOARDSIZE][BOARDSIZE];
-			for (int i = 0; i < BOARDSIZE; i++) {
-			for (int j = 0; j < BOARDSIZE; j++) {
-			board[i][j] = (Piece)boardArray.at(i*BOARDSIZE + j).as_integer();
-			}
-			}
-			g.setBoard(board);
-			nextXY = g.placePiece();
+  BoardRequest payload;
+  if (glz::read<glz::opts{.error_on_missing_keys = true}>(payload, request.body) ||
+      payload.board.size() != kBoardSize * kBoardSize) {
+    return false;
+  }
 
-			}).wait();
-	auto responseJson = json::value::object();
-	responseJson[utility::conversions::to_utf8string("x")] = nextXY.first;
-	responseJson[utility::conversions::to_utf8string("y")] = nextXY.second;
-	http_response response(status_codes::OK);
-	response.headers().add(U("Access-Control-Allow-Origin"), U("*"));
-	response.set_body(responseJson);
-	request.reply(response);
+  for (int row = 0; row < kBoardSize; ++row) {
+    for (int column = 0; column < kBoardSize; ++column) {
+      const int value = payload.board[row * kBoardSize + column];
+      if (value < Piece::EMPTY || value > Piece::WHITE) {
+        return false;
+      }
+      cells[row][column] = static_cast<Piece>(value);
+    }
+  }
+  return true;
 }
 
+template <typename Handler>
+void handleBoardRequest(const httplib::Request& request, httplib::Response& response,
+                        const std::vector<int>& patternEvals1,
+                        const std::vector<int>& patternEvals2, Handler&& handler)
+{
+  BoardCells cells{};
+  if (!parseBoard(request, cells)) {
+    response.status = 204;
+    setCorsHeaders(response);
+    return;
+  }
 
+  Piece board[kBoardSize][kBoardSize];
+  for (int row = 0; row < kBoardSize; ++row) {
+    for (int column = 0; column < kBoardSize; ++column) {
+      board[row][column] = cells[row][column];
+    }
+  }
 
+  Gomoku game(patternEvals1, patternEvals2);
+  game.setBoard(board);
+  sendJson(response, handler(game));
+}
 
-int main(int argc, char** argv) {
+int run(int argc, char** argv)
+{
+  if (argc != 2) {
+    std::cerr << "Usage: gomoku-server <pattern-file>\n";
+    return 1;
+  }
 
-	if (argc != 2) {
-		std::cerr<< "please pass in the pattern file"<<std::endl;
-	}
+  std::vector<int> patternEvals1;
+  std::vector<int> patternEvals2;
+  RowEvaluator rowEvaluator;
+  rowEvaluator.setPatterns(argv[1], patternEvals1, patternEvals2);
 
-	RowEvaluator rowEvaluator;
-	rowEvaluator.setPatterns(argv[1],patternEvals1,patternEvals2);
+  httplib::Server server;
+  const auto optionsHandler = [](const httplib::Request&, httplib::Response& response) {
+    response.status = 204;
+    setCorsHeaders(response);
+  };
+  server.Options("/api/iswinner/", optionsHandler);
+  server.Options("/api/getnextmove/", optionsHandler);
 
-	http_listener winnerListener(utility::conversions::to_utf8string("http://0.0.0.0:5000/api/iswinner/"));
-	winnerListener.support(methods::POST, isWinnerCheck);
-	winnerListener.support(methods::OPTIONS, defaultOption);
+  server.Post("/api/iswinner/", [&patternEvals1, &patternEvals2](const httplib::Request& request,
+                                                                 httplib::Response& response) {
+    handleBoardRequest(request, response, patternEvals1, patternEvals2,
+                       [](Gomoku& game) { return WinnerResponse{.winner = game.checkWinner()}; });
+  });
+  server.Post("/api/getnextmove/", [&patternEvals1, &patternEvals2](const httplib::Request& request,
+                                                                    httplib::Response& response) {
+    handleBoardRequest(request, response, patternEvals1, patternEvals2, [](Gomoku& game) {
+      const auto [x, y] = game.placePiece();
+      return MoveResponse{.x = x, .y = y};
+    });
+  });
 
-	http_listener nextStepListener(utility::conversions::to_utf8string("http://0.0.0.0:5000/api/getnextmove/"));
-	nextStepListener.support(methods::POST, getNextStep);
-	nextStepListener.support(methods::OPTIONS, defaultOption);
+  std::thread serverThread([&server] { server.listen("0.0.0.0", 5000); });
+  std::cout << "Server listening on http://0.0.0.0:5000. Press Enter to exit.\n";
+  std::string line;
+  std::getline(std::cin, line);
+  server.stop();
+  serverThread.join();
+  return 0;
+}
 
-	try
-	{
-		winnerListener.open();
-		nextStepListener.open();
-		std::cout << "Press ENTER to exit." << std::endl;
+}  // namespace gomoku::server
 
-		std::string line;
-		std::getline(std::cin, line);
-	}
-	catch (std::exception const & e)
-	{
-		std::cerr << "Error: " << e.what() << "\n";
-	}
-
+int main(int argc, char** argv)
+{
+  try {
+    return gomoku::server::run(argc, argv);
+  } catch (const std::exception& error) {
+    std::cerr << "Error: " << error.what() << '\n';
+    return 1;
+  }
 }

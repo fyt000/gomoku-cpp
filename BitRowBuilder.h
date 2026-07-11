@@ -1,33 +1,34 @@
 #pragma once
 
-//to get the length of the row
-//the bit string starts with '1' as empty
-// eg. ___O_ -> 100010 
-// __O_ -> 10010
+namespace gomoku {
+
+// The bit string starts with a sentinel 1 and represents empty cells with 1.
+// For example: ___O_ -> 100010 and __O_ -> 10010.
 class BitRowBuilder {
-public:
-	BitRowBuilder();
-	BitRowBuilder(int r);
-	int getRow();
-	void reset();
-	BitRowBuilder& add(bool isEmpty);
-	BitRowBuilder& add(int b);
-	bool isSet(int idx);
-	void inplaceReverse();
-	int length();
+ public:
+  BitRowBuilder();
+  explicit BitRowBuilder(int row);
 
+  [[nodiscard]] int getRow() const;
+  void reset();
+  BitRowBuilder& add(bool isEmpty);
+  BitRowBuilder& add(int bit);
+  [[nodiscard]] bool isSet(int index);
+  void inplaceReverse();
+  [[nodiscard]] int length();
 
-	static bool IsSet(int someRow, int idx);
-	static int RowSplice(int someRow, int idx);
-	static bool RowStartsWith(int someRow, int p);
-	static int GetReverse(int someRow);
-	static int LengthOf(int anotherRow);
+  [[nodiscard]] static bool IsSet(int row, int index);
+  [[nodiscard]] static int RowSplice(int row, int index);
+  [[nodiscard]] static bool RowStartsWith(int row, int pattern);
+  [[nodiscard]] static int GetReverse(int row);
+  [[nodiscard]] static int LengthOf(int row);
 
-	
+ private:
+  static constexpr int kEmptyRow = 1;
 
-private:
-	static const int EMPTYROW = 1;
-	int row;
-	int len;
-	bool lenDirty = false;
+  int row = kEmptyRow;
+  int len = 0;
+  bool lenDirty = false;
 };
+
+}  // namespace gomoku
