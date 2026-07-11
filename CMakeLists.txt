@@ -29,6 +29,7 @@ target_link_libraries(gomoku-cpp PRIVATE gomoku_engine)
 find_package(httplib CONFIG REQUIRED)
 find_package(glaze CONFIG REQUIRED)
 find_package(raylib CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(gomoku-server GomokuServer.cpp)
 target_link_libraries(gomoku-server PRIVATE
@@ -38,7 +39,7 @@ target_link_libraries(gomoku-server PRIVATE
 )
 
 add_executable(gomoku-gui GomokuGui.cpp)
-target_link_libraries(gomoku-gui PRIVATE gomoku_session raylib)
+target_link_libraries(gomoku-gui PRIVATE gomoku_session raylib Threads::Threads)
 
 add_executable(gomoku-mcp GomokuMcp.cpp)
 target_compile_features(gomoku-mcp PRIVATE cxx_std_23)

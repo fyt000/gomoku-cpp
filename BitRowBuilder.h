@@ -2,8 +2,9 @@
 
 namespace gomoku {
 
-// The bit string starts with a sentinel 1 and represents empty cells with 1.
-// For example: ___O_ -> 100010 and __O_ -> 10010.
+// The bit string starts with a sentinel 1, represents the evaluated player's
+// stones with 1, and represents empty cells with 0. Opponent stones delimit
+// a row and are not encoded. For example: ___O_ -> 100010 and __O_ -> 10010.
 class BitRowBuilder {
  public:
   BitRowBuilder();

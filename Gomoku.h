@@ -12,6 +12,13 @@ namespace gomoku {
 class Gomoku {
   using ScoreXY = std::tuple<int, int, int>;
 
+  struct SearchBounds {
+    int minX;
+    int maxX;
+    int minY;
+    int maxY;
+  };
+
  public:
   Gomoku();
   Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& patternLookup2);
@@ -59,9 +66,14 @@ class Gomoku {
   [[nodiscard]] int rowEval(int startX, int startY, int deltaX, int deltaY, Piece piece,
                             bool isOddStep);
   [[nodiscard]] int subRowEval(int subRow, bool isOddStep);
+  [[nodiscard]] int singlePieceEvaluation(int x, int y, Piece player, bool isOddStep);
   [[nodiscard]] Piece otherPlayer(Piece piece) const;
-  [[nodiscard]] std::vector<ScoreXY> genBestMoves(Piece current);
-  [[nodiscard]] ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
+  [[nodiscard]] bool isBoardEmpty() const;
+  [[nodiscard]] SearchBounds findSearchBounds() const;
+  [[nodiscard]] static SearchBounds includeMove(SearchBounds bounds, int x, int y);
+  [[nodiscard]] std::vector<ScoreXY> genBestMoves(Piece current, SearchBounds bounds);
+  [[nodiscard]] ScoreXY negaMax(int depth, int alpha, int beta, Piece next, int lastX,
+                                 int lastY, SearchBounds bounds);
   [[nodiscard]] int singlePieceWinner(int x, int y) const;
 };
 

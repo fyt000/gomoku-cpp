@@ -7,6 +7,14 @@
 
 namespace gomoku {
 
+namespace {
+
+constexpr int kSearchDepth = 4;
+constexpr int kMateScore = 1'000'000'000;
+constexpr int kInfinity = 1'500'000'000;
+
+}  // namespace
+
 Gomoku::Gomoku() = default;
 
 Gomoku::Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& patternLookup2)
@@ -27,12 +35,23 @@ bool Gomoku::placePiece(int x, int y)
 
 std::pair<int, int> Gomoku::placePiece()
 {
-  const auto move = negaMax(4, -99999999, 99999999, turn, turn);
+  if (checkWinner() || isBoardFull()) {
+    return {-1, -1};
+  }
+
+  if (isBoardEmpty()) {
+    constexpr int center = kBoardSize / 2;
+    (void)placePiece(center, center);
+    return {center, center};
+  }
+
+  const SearchBounds bounds = findSearchBounds();
+  const auto move = negaMax(kSearchDepth, -kInfinity, kInfinity, turn, -1, -1, bounds);
   int x = std::get<1>(move);
   int y = std::get<2>(move);
 
   if (x == -1 && y == -1) {
-    const auto moves = genBestMoves(turn);
+    const auto moves = genBestMoves(turn, bounds);
     if (moves.empty()) {
       return {-1, -1};
     }
@@ -66,6 +85,18 @@ bool Gomoku::isBoardFull() const
   for (int x = 0; x < kBoardSize; ++x) {
     for (int y = 0; y < kBoardSize; ++y) {
       if (board.getPiece(x, y) == Piece::EMPTY) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool Gomoku::isBoardEmpty() const
+{
+  for (int x = 0; x < kBoardSize; ++x) {
+    for (int y = 0; y < kBoardSize; ++y) {
+      if (board.getPiece(x, y) != Piece::EMPTY) {
         return false;
       }
     }
@@ -123,35 +154,65 @@ int Gomoku::subRowEval(int subRow, bool isOddStep)
   return isOddStep ? patternLookup1[subRow] : patternLookup2[subRow];
 }
 
+int Gomoku::singlePieceEvaluation(int x, int y, Piece player, bool isOddStep)
+{
+  int value = rowEval(0, y, 1, 0, player, isOddStep);
+  value += rowEval(x, 0, 0, 1, player, isOddStep);
+
+  if (y >= x) {
+    value += rowEval(0, y - x, 1, 1, player, isOddStep);
+  } else {
+    value += rowEval(x - y, 0, 1, 1, player, isOddStep);
+  }
+
+  if (x + y < kBoardSize) {
+    value += rowEval(0, x + y, 1, -1, player, isOddStep);
+  } else {
+    value += rowEval(x + y - (kBoardSize - 1), kBoardSize - 1, 1, -1, player, isOddStep);
+  }
+  return value;
+}
+
 Piece Gomoku::otherPlayer(Piece piece) const
 {
   return piece == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
 }
 
-std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece current)
+Gomoku::SearchBounds Gomoku::findSearchBounds() const
 {
-  const Piece opponent = otherPlayer(current);
-  std::vector<ScoreXY> scores;
-  int minX = kBoardSize / 2;
-  int maxX = kBoardSize / 2 + 1;
-  int minY = kBoardSize / 2;
-  int maxY = kBoardSize / 2 + 1;
+  SearchBounds bounds{.minX = kBoardSize / 2,
+                      .maxX = kBoardSize / 2,
+                      .minY = kBoardSize / 2,
+                      .maxY = kBoardSize / 2};
 
   for (int x = 0; x < kBoardSize; ++x) {
     for (int y = 0; y < kBoardSize; ++y) {
       if (board.getPiece(x, y) != Piece::EMPTY) {
-        minX = std::min(x, minX);
-        minY = std::min(y, minY);
-        maxX = std::max(x, maxX);
-        maxY = std::max(y, maxY);
+        bounds = includeMove(bounds, x, y);
       }
     }
   }
+  return bounds;
+}
 
-  minX = std::max(0, minX - 2);
-  maxX = std::min(kBoardSize - 1, maxX + 2);
-  minY = std::max(0, minY - 2);
-  maxY = std::min(kBoardSize - 1, maxY + 2);
+Gomoku::SearchBounds Gomoku::includeMove(SearchBounds bounds, int x, int y)
+{
+  return {.minX = std::min(bounds.minX, x),
+          .maxX = std::max(bounds.maxX, x),
+          .minY = std::min(bounds.minY, y),
+          .maxY = std::max(bounds.maxY, y)};
+}
+
+std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece current, SearchBounds bounds)
+{
+  const Piece opponent = otherPlayer(current);
+  const int minX = std::max(0, bounds.minX - 2);
+  const int maxX = std::min(kBoardSize - 1, bounds.maxX + 2);
+  const int minY = std::max(0, bounds.minY - 2);
+  const int maxY = std::min(kBoardSize - 1, bounds.maxY + 2);
+
+  std::vector<ScoreXY> scores;
+  scores.reserve((maxX - minX + 1) * (maxY - minY + 1));
 
   for (int x = minX; x <= maxX; ++x) {
     for (int y = minY; y <= maxY; ++y) {
@@ -159,14 +220,17 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece current)
         continue;
       }
 
+      const int beforeScore = singlePieceEvaluation(x, y, current, true) +
+                              singlePieceEvaluation(x, y, opponent, true);
       board.placePiece(x, y, current);
       if (singlePieceWinner(x, y)) {
+        board.placePiece(x, y, Piece::EMPTY);
         return {std::make_tuple(1, x, y)};
       }
 
-      int currentScore = evalBoard(current, true);
+      int currentScore = singlePieceEvaluation(x, y, current, true);
       board.placePiece(x, y, opponent);
-      currentScore += evalBoard(opponent, true);
+      currentScore += singlePieceEvaluation(x, y, opponent, true) - beforeScore;
       board.placePiece(x, y, Piece::EMPTY);
       scores.emplace_back(currentScore, x, y);
     }
@@ -178,26 +242,28 @@ std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece current)
   return scores;
 }
 
-Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start, Piece next)
+Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece next, int lastX,
+                                 int lastY, SearchBounds bounds)
 {
-  const Piece opponent = otherPlayer(start);
-
-  if (checkWinner()) {
-    const Piece realOpponent = otherPlayer(next);
-    return std::make_tuple(evalBoard(next, true) - evalBoard(realOpponent, true), -1, -1);
+  if (lastX >= 0 && singlePieceWinner(lastX, lastY)) {
+    // The player who made the preceding move won, so the side to move has lost.
+    // More remaining depth means the loss happened earlier in the searched line.
+    return std::make_tuple(-kMateScore - depth, -1, -1);
   }
   if (depth == 0) {
-    return std::make_tuple(evalBoard(start, false) - evalBoard(opponent, true), -1, -1);
+    const Piece opponent = otherPlayer(next);
+    return std::make_tuple(evalBoard(next, false) - evalBoard(opponent, true), -1, -1);
   }
 
   int bestX = -1;
   int bestY = -1;
-  int bestValue = -99999999;
-  for (const auto& score : genBestMoves(next)) {
+  int bestValue = -kInfinity;
+  for (const auto& score : genBestMoves(next, bounds)) {
     const int x = std::get<1>(score);
     const int y = std::get<2>(score);
     board.placePiece(x, y, next);
-    const auto nextScore = negaMax(depth - 1, -beta, -alpha, start, otherPlayer(next));
+    const auto nextScore = negaMax(depth - 1, -beta, -alpha, otherPlayer(next), x, y,
+                                   includeMove(bounds, x, y));
     const int value = -std::get<0>(nextScore);
 
     if (value > bestValue) {
@@ -235,22 +301,24 @@ int Gomoku::singlePieceWinner(int x, int y) const
     return 0;
   }
 
-  constexpr int deltaX[] = {0, 1, 1, 1, 0, -1, -1, -1};
-  constexpr int deltaY[] = {-1, -1, 0, 1, 1, 1, 0, -1};
-  for (int direction = 0; direction < 8; ++direction) {
-    int count = 0;
-    int nextX = x;
-    int nextY = y;
-    for (int i = 0; i < 4; ++i) {
-      nextX += deltaX[direction];
-      nextY += deltaY[direction];
-      if (nextX < 0 || nextX >= kBoardSize || nextY < 0 || nextY >= kBoardSize ||
-          board.getPiece(nextX, nextY) != piece) {
-        break;
+  constexpr int deltaX[] = {0, 1, 1, 1};
+  constexpr int deltaY[] = {1, 0, 1, -1};
+  for (int direction = 0; direction < 4; ++direction) {
+    int count = 1;
+    for (const int sign : {-1, 1}) {
+      int nextX = x;
+      int nextY = y;
+      for (int i = 0; i < 4; ++i) {
+        nextX += sign * deltaX[direction];
+        nextY += sign * deltaY[direction];
+        if (nextX < 0 || nextX >= kBoardSize || nextY < 0 || nextY >= kBoardSize ||
+            board.getPiece(nextX, nextY) != piece) {
+          break;
+        }
+        ++count;
       }
-      ++count;
     }
-    if (count == 4) {
+    if (count >= 5) {
       return static_cast<int>(piece);
     }
   }
