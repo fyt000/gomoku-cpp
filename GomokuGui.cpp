@@ -27,21 +27,24 @@ namespace gomoku::gui {
 
 namespace {
 
-constexpr int kWindowWidth = 1040;
-constexpr int kWindowHeight = 790;
-constexpr float kBoardLeft = 50.0F;
-constexpr float kBoardTop = 75.0F;
 constexpr float kCellSize = 45.0F;
-constexpr float kPanelLeft = 730.0F;
-constexpr float kPanelTop = 51.0F;
+constexpr float kBoardPadding = 24.0F;
+constexpr float kBoardCanvasSize = kCellSize * (kBoardSize - 1) + 2.0F * kBoardPadding;
+constexpr float kBoardLeft = kBoardPadding;
+constexpr float kBoardTop = kBoardPadding;
 constexpr float kPanelWidth = 290.0F;
-constexpr float kPanelHeight = 678.0F;
-constexpr float kButtonLeft = 760.0F;
+constexpr float kPanelHeight = kBoardCanvasSize;
+constexpr float kPanelLeft = kBoardCanvasSize;
+constexpr float kPanelTop = 0.0F;
+constexpr int kWindowWidth = static_cast<int>(kBoardCanvasSize + kPanelWidth);
+constexpr int kWindowHeight = static_cast<int>(kBoardCanvasSize);
+constexpr float kPanelContentLeft = kPanelLeft + 30.0F;
+constexpr float kButtonLeft = kPanelContentLeft;
 constexpr float kButtonWidth = 230.0F;
-constexpr float kFirstButtonTop = 620.0F;
-constexpr float kSecondButtonTop = 675.0F;
+constexpr float kFirstButtonTop = 569.0F;
+constexpr float kSecondButtonTop = 624.0F;
 constexpr float kButtonHeight = 46.0F;
-constexpr float kEffortTop = 184.0F;
+constexpr float kEffortTop = 133.0F;
 constexpr float kEffortArrowWidth = 46.0F;
 constexpr float kEffortValueWidth = kButtonWidth - 2.0F * kEffortArrowWidth;
 constexpr Color kBoardColor{222, 179, 104, 255};
@@ -241,9 +244,8 @@ void drawWinningPieces(const GameSession& game)
 
 void drawBoard(const GameSession& game, const LastComputerMove& lastComputerMove)
 {
-  DrawRectangle(static_cast<int>(kBoardLeft - 24.0F), static_cast<int>(kBoardTop - 24.0F),
-                static_cast<int>(kCellSize * (kBoardSize - 1) + 48.0F),
-                static_cast<int>(kCellSize * (kBoardSize - 1) + 48.0F), kBoardColor);
+  DrawRectangle(0, 0, static_cast<int>(kBoardCanvasSize), static_cast<int>(kBoardCanvasSize),
+                kBoardColor);
 
   for (int index = 0; index < kBoardSize; ++index) {
     const float offset = kCellSize * index;
@@ -511,9 +513,9 @@ int run(int argc, char** argv)
     DrawRectangle(static_cast<int>(kPanelLeft), static_cast<int>(kPanelTop),
                   static_cast<int>(kPanelWidth), static_cast<int>(kPanelHeight), kPanelColor);
     if (computerThinking) {
-      drawThinking(760.0F, 84.0F);
+      drawThinking(kPanelContentLeft, 33.0F);
     } else {
-      DrawText(status.c_str(), 760, 84, 22, RAYWHITE);
+      DrawText(status.c_str(), static_cast<int>(kPanelContentLeft), 33, 22, RAYWHITE);
     }
     const Piece winner = game.checkWinner();
     const char* hint = !gameStarted ? "Black moves first."
@@ -521,7 +523,7 @@ int run(int argc, char** argv)
                            ? "Start a new game to play again."
                        : computerThinking ? "Your move is on the board."
                                           : "Click board to play.";
-    DrawText(hint, 760, 120, 17, Color{185, 194, 202, 255});
+    DrawText(hint, static_cast<int>(kPanelContentLeft), 69, 17, Color{185, 194, 202, 255});
     drawEffortSelector(effort, !computerThinking);
     if (gameStarted) {
       drawButton(firstButton, "Retract turn", !computerThinking && canRetract(game, human));
