@@ -8,6 +8,10 @@
       "default-features": false
     },
     "catch2",
-    "glaze"
+    "glaze",
+    {
+      "name": "raylib",
+      "default-features": false
+    }
   ]
 }

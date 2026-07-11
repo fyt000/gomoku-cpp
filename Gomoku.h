@@ -36,12 +36,16 @@ class Gomoku {
         }
       }
     }
-    turn = pieceCount < 0 ? Piece::BLACK : Piece::WHITE;
+    turn = pieceCount <= 0 ? Piece::BLACK : Piece::WHITE;
   }
 
   bool placePiece(int x, int y);
   [[nodiscard]] std::pair<int, int> placePiece();
-  [[nodiscard]] int checkWinner();
+  void reset();
+  [[nodiscard]] int checkWinner() const;
+  [[nodiscard]] Piece getPiece(int x, int y) const;
+  [[nodiscard]] Piece currentTurn() const;
+  [[nodiscard]] bool isBoardFull() const;
 
   friend std::ostream& operator<<(std::ostream& stream, const Gomoku& gomoku);
 

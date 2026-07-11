@@ -16,7 +16,8 @@ Gomoku::Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& p
 
 bool Gomoku::placePiece(int x, int y)
 {
-  if (board.getPiece(x, y) != Piece::EMPTY) {
+  if (x < 0 || x >= kBoardSize || y < 0 || y >= kBoardSize ||
+      board.getPiece(x, y) != Piece::EMPTY) {
     return false;
   }
   board.placePiece(x, y, turn);
@@ -42,6 +43,34 @@ std::pair<int, int> Gomoku::placePiece()
 
   placePiece(x, y);
   return {x, y};
+}
+
+void Gomoku::reset()
+{
+  board = Board{};
+  turn = Piece::BLACK;
+}
+
+Piece Gomoku::getPiece(int x, int y) const
+{
+  return board.getPiece(x, y);
+}
+
+Piece Gomoku::currentTurn() const
+{
+  return turn;
+}
+
+bool Gomoku::isBoardFull() const
+{
+  for (int x = 0; x < kBoardSize; ++x) {
+    for (int y = 0; y < kBoardSize; ++y) {
+      if (board.getPiece(x, y) == Piece::EMPTY) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 int Gomoku::evalBoard(Piece player, bool isOddStep)
@@ -186,7 +215,7 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start, Pie
   return std::make_tuple(bestValue, bestX, bestY);
 }
 
-int Gomoku::checkWinner()
+int Gomoku::checkWinner() const
 {
   for (int x = 0; x < kBoardSize; ++x) {
     for (int y = 0; y < kBoardSize; ++y) {

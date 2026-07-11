@@ -8,7 +8,8 @@ Board::Board() = default;
 
 void Board::placePiece(int x, int y, Piece piece)
 {
-  if (piece < Piece::EMPTY || piece > Piece::WHITE) {
+  if (x < 0 || x >= kBoardSize || y < 0 || y >= kBoardSize || piece < Piece::EMPTY ||
+      piece > Piece::WHITE) {
     return;
   }
   board[x][y] = piece;
@@ -16,6 +17,9 @@ void Board::placePiece(int x, int y, Piece piece)
 
 Piece Board::getPiece(int x, int y) const
 {
+  if (x < 0 || x >= kBoardSize || y < 0 || y >= kBoardSize) {
+    return Piece::EMPTY;
+  }
   return board[x][y];
 }
 
