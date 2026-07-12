@@ -1,284 +1,748 @@
 #include "Gomoku.h"
-#include "BitRowBuilder.h"
+
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <bit>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <future>
+#include <limits>
+#include <ostream>
+#include <random>
+#include <utility>
+#include <vector>
 
-Gomoku::Gomoku()
+#include "CompiledEvaluationTables.h"
+#include "HardwareConcurrency.h"
+
+namespace gomoku {
+
+namespace {
+
+using Score = std::int64_t;
+
+constexpr Score kMateScore = 1'000'000'000'000LL;
+constexpr Score kInfinity = std::numeric_limits<Score>::max() / 4;
+constexpr unsigned int kMaximumRootThreads = 8;
+constexpr std::size_t kLineCount = 72;
+constexpr std::size_t kCellCount = kBoardSize * kBoardSize;
+
+struct LineDefinition {
+  std::uint8_t startX = 0;
+  std::uint8_t startY = 0;
+  std::int8_t deltaX = 0;
+  std::int8_t deltaY = 0;
+  std::uint8_t length = 0;
+};
+
+struct CellLineReference {
+  std::uint8_t line = 0;
+  std::uint16_t bit = 0;
+};
+
+struct CellGeometry {
+  std::array<CellLineReference, 4> references{};
+  std::uint8_t count = 0;
+};
+
+struct LineGeometry {
+  std::array<LineDefinition, kLineCount> lines{};
+  std::array<CellGeometry, kCellCount> cells{};
+};
+
+const LineGeometry& lineGeometry()
 {
+  static const LineGeometry geometry = [] {
+    LineGeometry result{};
+    std::size_t lineCount = 0;
+
+    const auto addLine = [&](int startX, int startY, int deltaX, int deltaY) {
+      int length = 0;
+      int x = startX;
+      int y = startY;
+      while (x >= 0 && x < kBoardSize && y >= 0 && y < kBoardSize) {
+        ++length;
+        x += deltaX;
+        y += deltaY;
+      }
+      if (length < 5) {
+        return;
+      }
+
+      assert(lineCount < result.lines.size());
+      result.lines[lineCount] = {.startX = static_cast<std::uint8_t>(startX),
+                                 .startY = static_cast<std::uint8_t>(startY),
+                                 .deltaX = static_cast<std::int8_t>(deltaX),
+                                 .deltaY = static_cast<std::int8_t>(deltaY),
+                                 .length = static_cast<std::uint8_t>(length)};
+
+      x = startX;
+      y = startY;
+      for (int offset = 0; offset < length; ++offset) {
+        CellGeometry& cell = result.cells[static_cast<std::size_t>(x * kBoardSize + y)];
+        assert(cell.count < cell.references.size());
+        cell.references[cell.count++] = {
+            .line = static_cast<std::uint8_t>(lineCount),
+            .bit = static_cast<std::uint16_t>(1u << (length - 1 - offset))};
+        x += deltaX;
+        y += deltaY;
+      }
+      ++lineCount;
+    };
+
+    for (int row = 0; row < kBoardSize; ++row) {
+      addLine(row, 0, 0, 1);
+    }
+    for (int column = 0; column < kBoardSize; ++column) {
+      addLine(0, column, 1, 0);
+    }
+    for (int column = 0; column <= kBoardSize - 5; ++column) {
+      addLine(0, column, 1, 1);
+    }
+    for (int row = 1; row <= kBoardSize - 5; ++row) {
+      addLine(row, 0, 1, 1);
+    }
+    for (int column = 4; column < kBoardSize; ++column) {
+      addLine(0, column, 1, -1);
+    }
+    for (int row = 1; row <= kBoardSize - 5; ++row) {
+      addLine(row, kBoardSize - 1, 1, -1);
+    }
+
+    assert(lineCount == result.lines.size());
+    return result;
+  }();
+  return geometry;
 }
 
-Gomoku::Gomoku(const std::vector<int>& patternLookup1, const std::vector<int>& patternLookup2): 
-	patternLookup1(patternLookup1), patternLookup2(patternLookup2)
+std::uint64_t splitMix64(std::uint64_t& state)
 {
-	// maxScore = (*std::max_element(patternLookup1.begin(),patternLookup1.end()));
-	// maxScore = std::max(maxScore, (*std::max_element(patternLookup2.begin(),patternLookup2.end())));
-	// wonScore = 5*maxScore;
+  std::uint64_t value = (state += 0x9E3779B97F4A7C15ULL);
+  value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+  return value ^ (value >> 31);
 }
 
+struct ZobristKeys {
+  std::array<std::array<std::uint64_t, 2>, kCellCount> pieces{};
+  std::array<std::uint64_t, 2> sideToMove{};
+};
+
+const ZobristKeys& zobristKeys()
+{
+  static const ZobristKeys keys = [] {
+    ZobristKeys result{};
+    std::uint64_t state = 0xD1B54A32D192ED03ULL;
+    for (auto& cell : result.pieces) {
+      cell[0] = splitMix64(state);
+      cell[1] = splitMix64(state);
+    }
+    result.sideToMove[0] = splitMix64(state);
+    result.sideToMove[1] = splitMix64(state);
+    return result;
+  }();
+  return keys;
+}
+
+enum class BoundType : std::uint8_t { EXACT, LOWER, UPPER };
+
+struct TranspositionEntry {
+  std::uint64_t key = 0;
+  Score value = 0;
+  std::uint32_t generation = 0;
+  std::int16_t depth = -1;
+  std::int8_t bestX = -1;
+  std::int8_t bestY = -1;
+  BoundType bound = BoundType::EXACT;
+};
+
+class TranspositionTable {
+ public:
+  void beginSearch()
+  {
+    ++generation;
+    if (generation == 0) {
+      std::fill(entries.begin(), entries.end(), TranspositionEntry{});
+      generation = 1;
+    }
+  }
+
+  [[nodiscard]] const TranspositionEntry* find(std::uint64_t key) const
+  {
+    const TranspositionEntry& entry = entries[static_cast<std::size_t>(key) & (entries.size() - 1)];
+    if (entry.generation == generation && entry.key == key) {
+      return &entry;
+    }
+    return nullptr;
+  }
+
+  void store(std::uint64_t key, int depth, Score value, BoundType bound, int bestX, int bestY)
+  {
+    TranspositionEntry& entry = entries[static_cast<std::size_t>(key) & (entries.size() - 1)];
+    if (entry.generation == generation && entry.depth > depth) {
+      return;
+    }
+    entry = {.key = key,
+             .value = value,
+             .generation = generation,
+             .depth = static_cast<std::int16_t>(depth),
+             .bestX = static_cast<std::int8_t>(bestX),
+             .bestY = static_cast<std::int8_t>(bestY),
+             .bound = bound};
+  }
+
+ private:
+  static constexpr std::size_t kEntryCount = 1u << 17;
+  std::vector<TranspositionEntry> entries = std::vector<TranspositionEntry>(kEntryCount);
+  std::uint32_t generation = 0;
+};
+
+thread_local TranspositionTable transpositionTable;
+
+bool containsFive(std::uint16_t mask)
+{
+  return (mask & static_cast<std::uint16_t>(mask >> 1) & static_cast<std::uint16_t>(mask >> 2) &
+          static_cast<std::uint16_t>(mask >> 3) & static_cast<std::uint16_t>(mask >> 4)) != 0;
+}
+
+}  // namespace
+
+std::uint64_t generateRandomSeed()
+{
+  std::random_device device;
+  return (static_cast<std::uint64_t>(device()) << 32) ^ static_cast<std::uint64_t>(device());
+}
+
+Gomoku::Gomoku() : Gomoku(compiledEvaluationTables()) {}
+
+Gomoku::Gomoku(EvaluationTablesPtr evaluationTables)
+    : evaluationTables(evaluationTables ? std::move(evaluationTables) : compiledEvaluationTables())
+{
+  rebuildDerivedState();
+}
+
+Piece Gomoku::otherPlayer(Piece piece)
+{
+  return piece == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
+}
+
+int Gomoku::playerIndex(Piece piece)
+{
+  return piece == Piece::WHITE ? 1 : 0;
+}
+
+std::size_t Gomoku::scoreIndex(Piece piece, PatternTurn patternTurn)
+{
+  return static_cast<std::size_t>(playerIndex(piece) * 2 +
+                                  (patternTurn == PatternTurn::OWNER_TO_MOVE ? 0 : 1));
+}
 
 bool Gomoku::placePiece(int x, int y)
 {
-	if (board.getPiece(x, y) != Piece::EMPTY)
-		return false;
-	board.placePiece(x, y, turn);
-	turn = otherPlayer(turn);
-	return true;
+  if (x < 0 || x >= kBoardSize || y < 0 || y >= kBoardSize ||
+      board.getPiece(x, y) != Piece::EMPTY) {
+    return false;
+  }
+  setPieceInternal(x, y, turn);
+  turn = otherPlayer(turn);
+  return true;
 }
 
-std::pair<int,int> Gomoku::placePiece()
+std::pair<int, int> Gomoku::placePiece()
 {
-	//auto p = alphaBeta(4, -99999999, 99999999, true, turn);
-	auto p = negaMax(4,-99999999,99999999,turn,turn);
-	int x = std::get<1>(p);
-	int y = std::get<2>(p);
-	//lost already
-	if (x == -1 && y == -1) {
-		auto anyP = genBestMoves(turn)[0];
-		x = std::get<1>(anyP);
-		y = std::get<2>(anyP);
-	}
-	placePiece(x, y);
-	return { x,y };
+  return placePiece(SearchOptions{});
 }
 
-
-int Gomoku::evalBoard(Piece player, bool isOddStep) {
-	int val = 0;
-
-	//for better locality
-	//store these directions each in an array
-	//but also find a mapping from placing a piece x,y
-	//to update the board
-	
-	for (int i = 0; i < BOARDSIZE; i++) {
-		//vertical
-		val += rowEval(0, i, 1, 0, player, isOddStep);
-		//horizontal
-		val += rowEval(i, 0, 0, 1, player, isOddStep);
-
-		//diagonal '\'
-		val += rowEval(0, i, 1, 1, player, isOddStep);
-
-		//diagonal /
-		val += rowEval(0, i, 1, -1, player, isOddStep);
-	}
-
-	//the otherway for diagnoals
-	for (int j = 1; j < BOARDSIZE; j++) {
-		val += rowEval(j, 0, 1, 1, player, isOddStep);
-		val += rowEval(j, BOARDSIZE - 1, 1, -1, player, isOddStep);
-	}
-
-	return val;
-}
-
-int Gomoku::rowEval(int x, int y, int dx, int dy, Piece self, bool isOddStep)
+std::pair<int, int> Gomoku::placePiece(int searchDepth)
 {
-	Piece opponent = otherPlayer(self);
-	BitRowBuilder rowBuilder;
-	int val = 0;
-	for (int i = 0; i < BOARDSIZE; i++) {
-		if (x < 0 || x >= BOARDSIZE || y < 0 || y >= BOARDSIZE)
-			break;
-		Piece p = board.getPiece(x, y);
-		x += dx;
-		y += dy;
-		if (p == opponent) {
-			val += subRowEval(rowBuilder.getRow(), isOddStep);
-			rowBuilder.reset();
-			continue;
-		}
-		rowBuilder.add(p == Piece::EMPTY);
-	}
-	val += subRowEval(rowBuilder.getRow(), isOddStep);
-	return val;
+  return placePiece(SearchOptions{.depth = searchDepth});
 }
 
-int Gomoku::subRowEval(int subRow, bool isOddStep)
+std::pair<int, int> Gomoku::placePiece(SearchOptions options)
 {
-	//less than 5
-	if (subRow <= (1 << 5))
-		return 0;
+  if (checkWinner() != Piece::EMPTY || isBoardFull()) {
+    return {-1, -1};
+  }
 
-	if (isOddStep) {
-		return patternLookup1[subRow];
-	}
-	else {
-		return patternLookup2[subRow];
-	}
+  if (board.isEmpty()) {
+    constexpr int center = kBoardSize / 2;
+    (void)placePiece(center, center);
+    return {center, center};
+  }
+
+  transpositionTable.beginSearch();
+  const int depth = std::max(1, options.depth);
+  const int frontierRadius = std::clamp(options.frontierRadius, 1, 4);
+  const std::uint64_t seed = options.seed.value_or(generateRandomSeed());
+  const auto move = options.threadCount > 1
+                        ? parallelRootSearch(depth, turn, frontierRadius, options.threadCount, seed)
+                        : negaMax(depth, -kInfinity, kInfinity, turn, -1, -1, frontierRadius, seed);
+  int x = std::get<1>(move);
+  int y = std::get<2>(move);
+
+  if (x == -1 && y == -1) {
+    const MoveList moves = genBestMoves(turn, frontierRadius);
+    if (moves.size == 0) {
+      return {-1, -1};
+    }
+    x = moves.moves[0].x;
+    y = moves.moves[0].y;
+  }
+
+  (void)placePiece(x, y);
+  return {x, y};
 }
 
-Piece Gomoku::otherPlayer(Piece p)
+void Gomoku::reset()
 {
-	return p == Piece::WHITE ? Piece::BLACK : Piece::WHITE;
+  board = Board{};
+  turn = Piece::BLACK;
+  rebuildDerivedState();
 }
 
-
-//this method still needs some tunning
-//let me try to optimize first
-//then I could probably allow a larger set of moves
-std::vector<Gomoku::ScoreXY> Gomoku::genBestMoves(Piece cur)
+Piece Gomoku::getPiece(int x, int y) const
 {
-	auto opponent = otherPlayer(cur);
-	std::vector<ScoreXY> scores;
-	int minX = BOARDSIZE / 2;
-	int maxX = BOARDSIZE / 2 + 1;
-	int minY = BOARDSIZE / 2;
-	int maxY = BOARDSIZE / 2 + 1;
-	for (int x = 0; x < BOARDSIZE; x++) {
-		for (int y = 0; y < BOARDSIZE; y++) {
-			auto p = board.getPiece(x, y);
-			if (p != Piece::EMPTY) {
-				minX = std::min(x, minX);
-				minY = std::min(y, minY);
-				maxX = std::max(x, maxX);
-				maxY = std::max(y, maxY);
-			}
-		}
-	}
-	minX -= 2;
-	maxX += 2;
-	minY -= 2;
-	maxY += 2;
-	minX = std::max(0, minX);
-	maxX = std::min(BOARDSIZE - 1, maxX);
-	minY = std::max(0, minY);
-	maxY = std::min(BOARDSIZE - 1, maxY);
-
-	for (int x = minX; x <= maxX; x++) {
-		for (int y = minY; y <= maxY; y++) {
-			auto p = board.getPiece(x, y);
-			if (p == Piece::EMPTY) {
-				board.placePiece(x, y, cur);
-				// if cur can win, then just go for it
-				if (singlePieceWinner(x, y)) {
-					// std::cout<<board<<std::endl;
-					// std::cout<<x<<" "<<y<<std::endl;
-					// board.placePiece(x, y, Piece::EMPTY);
-					return {std::make_tuple(1,x,y)};
-				}
-				int curScore = evalBoard(cur, true);
-				board.placePiece(x, y, opponent);
-				curScore += evalBoard(opponent, true);
-				board.placePiece(x, y, Piece::EMPTY);
-				scores.emplace_back(curScore, x, y);
-			}
-			
-		}
-	}
-	//sorting still helps
-	std::sort(scores.begin(), scores.end(), [](const ScoreXY& lhs, const ScoreXY& rhs) {
-		return std::get<0>(lhs) > std::get<0>(rhs);
-	});
-
-	//keep top 20 scores	
-	//scores.resize(20);
-
-	return scores;
+  return board.getPiece(x, y);
 }
 
-//based on 4 steps
-// odd total step pass true, false
-// even total step pass false, true
-Gomoku::ScoreXY Gomoku::negaMax(int depth, int alpha, int beta, Piece start, Piece next) {
-	auto opponent = otherPlayer(start);
-
-	//early termination is weird...
-	// 4 B
-	// 3 W
-	// 2 B
-	// 1 W <- if winner at this step then scoreOf(W) - scoreOf(B)
-	// 0 B <- this = scoreOf(B) - scoreOf(W) by default
-
-	if ( checkWinner()) {
-		auto realOpponent = otherPlayer(next);
-		//true false doesn't matter if a winner is decided, I guess maybe
-		int score = evalBoard(next,true) - evalBoard(realOpponent, true);
-		return std::make_tuple(score,-1,-1 );
-	}
-	if (depth == 0) {
-		return std::make_tuple( evalBoard(start,false) - evalBoard(opponent,true),-1,-1 );
-	}
-
-	int bestX = -1;
-	int bestY = -1;
-	int bestVal = -99999999;
-
-	for (const auto& scoreXY : genBestMoves(next)) {
-		int x = std::get<1>(scoreXY);
-		int y = std::get<2>(scoreXY);
-		board.placePiece(x,y,next);
-		auto nextScoreXY = negaMax(depth - 1, -1*beta, -1*alpha, start, otherPlayer(next));
-		int v = -1 * std::get<0>(nextScoreXY);
-		// if (depth == 4) {
-		// 	std::cerr<<board;
-		// 	std::cerr<<v<<std::endl;
-		// 	std::cerr<<x<<" "<<y<<std::endl;
-		// }
-		
-		if (v > bestVal) {
-			bestX = x;
-			bestY = y;
-			bestVal = v;
-		}
-		board.placePiece(x, y, Piece::EMPTY);
-		alpha = std::max(alpha, v);
-		if (beta <= alpha)
-			break;
-	}
-
-	return std::make_tuple( bestVal,bestX,bestY );	
-}
-
-int Gomoku::checkWinner()
-{	
-	for (int x = 0; x <= BOARDSIZE; x++) {
-		for (int y = 0; y <= BOARDSIZE; y++) {
-			auto winner = singlePieceWinner(x,y);
-			if (winner) {
-				return winner;
-			}
-		}
-	}
-	return 0;
-}
-
-int Gomoku::singlePieceWinner(int x,int y) {
-	auto p = board.getPiece(x, y);
-	if (p == Piece::EMPTY) {
-		return 0;
-	}
-	int dirx[] = { 0, 1, 1, 1, 0, -1, -1, -1 };
-	int diry[] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-	//how do I zip dirx diry
-	for (int d = 0; d < 8;d++) {
-		int count = 0;
-		int nx = x;
-		int ny = y;
-		for (int i = 0; i <= 4; i++) {
-			nx = nx + dirx[d];
-			ny = ny + diry[d];
-			if (nx >= 0 && nx < 15 && ny >= 0 && ny < 15) {
-				if (board.getPiece(nx, ny) != p) {
-					break;
-				}
-				else {
-					count++;
-				}
-			}
-			else
-				break;
-		}
-		if (count == 4)
-			return (int)p;
-	}
-	return 0;
-}
-
-
-std::ostream & operator<<(std::ostream & stream, const Gomoku & gomoku)
+Piece Gomoku::currentTurn() const
 {
-	stream << "Player " << gomoku.turn << "'s turn" << std::endl;
-	stream << gomoku.board << std::endl;
-	return stream;
+  return turn;
 }
 
+bool Gomoku::isBoardFull() const
+{
+  return board.isFull();
+}
+
+Gomoku::Score Gomoku::subRowEval(int subRow, PatternTurn patternTurn) const
+{
+  if (subRow <= (1 << 5)) {
+    return 0;
+  }
+  const auto& lookup = patternTurn == PatternTurn::OWNER_TO_MOVE
+                           ? evaluationTables->ownerToMove
+                           : evaluationTables->opponentToMove;
+  return lookup[static_cast<std::size_t>(subRow)];
+}
+
+void Gomoku::recomputeLine(std::size_t lineIndex)
+{
+  const int length = lineGeometry().lines[lineIndex].length;
+  LineState& line = lines[lineIndex];
+  line.scores = {};
+  int blackRow = 1;
+  int whiteRow = 1;
+
+  const auto finishSubRow = [this, &line](Piece player, int subRow) {
+    line.scores[scoreIndex(player, PatternTurn::OWNER_TO_MOVE)] +=
+        subRowEval(subRow, PatternTurn::OWNER_TO_MOVE);
+    line.scores[scoreIndex(player, PatternTurn::OPPONENT_TO_MOVE)] +=
+        subRowEval(subRow, PatternTurn::OPPONENT_TO_MOVE);
+  };
+
+  for (int offset = 0; offset < length; ++offset) {
+    const std::uint16_t bit = static_cast<std::uint16_t>(1u << (length - 1 - offset));
+    if ((line.white & bit) != 0) {
+      finishSubRow(Piece::BLACK, blackRow);
+      blackRow = 1;
+    } else {
+      blackRow = (blackRow << 1) | ((line.black & bit) != 0 ? 1 : 0);
+    }
+
+    if ((line.black & bit) != 0) {
+      finishSubRow(Piece::WHITE, whiteRow);
+      whiteRow = 1;
+    } else {
+      whiteRow = (whiteRow << 1) | ((line.white & bit) != 0 ? 1 : 0);
+    }
+  }
+
+  finishSubRow(Piece::BLACK, blackRow);
+  finishSubRow(Piece::WHITE, whiteRow);
+}
+
+void Gomoku::rebuildDerivedState()
+{
+  lines = {};
+  totalScores = {};
+  positionHash = 0;
+  const LineGeometry& geometry = lineGeometry();
+
+  for (std::size_t lineIndex = 0; lineIndex < geometry.lines.size(); ++lineIndex) {
+    const LineDefinition& definition = geometry.lines[lineIndex];
+    int x = definition.startX;
+    int y = definition.startY;
+    for (int offset = 0; offset < definition.length; ++offset) {
+      const std::uint16_t bit = static_cast<std::uint16_t>(1u << (definition.length - 1 - offset));
+      const Piece piece = board.getPiece(x, y);
+      if (piece == Piece::BLACK) {
+        lines[lineIndex].black |= bit;
+      } else if (piece == Piece::WHITE) {
+        lines[lineIndex].white |= bit;
+      }
+      x += definition.deltaX;
+      y += definition.deltaY;
+    }
+    recomputeLine(lineIndex);
+    for (std::size_t score = 0; score < totalScores.size(); ++score) {
+      totalScores[score] += lines[lineIndex].scores[score];
+    }
+  }
+
+  const ZobristKeys& keys = zobristKeys();
+  for (int x = 0; x < kBoardSize; ++x) {
+    for (int y = 0; y < kBoardSize; ++y) {
+      const Piece piece = board.getPiece(x, y);
+      if (piece != Piece::EMPTY) {
+        positionHash ^=
+            keys.pieces[static_cast<std::size_t>(x * kBoardSize + y)][playerIndex(piece)];
+      }
+    }
+  }
+}
+
+void Gomoku::setPieceInternal(int x, int y, Piece piece)
+{
+  const Piece previous = board.getPiece(x, y);
+  if (previous == piece) {
+    return;
+  }
+
+  const CellGeometry& cell = lineGeometry().cells[static_cast<std::size_t>(x * kBoardSize + y)];
+  for (int referenceIndex = 0; referenceIndex < cell.count; ++referenceIndex) {
+    const CellLineReference& reference = cell.references[static_cast<std::size_t>(referenceIndex)];
+    LineState& line = lines[reference.line];
+    for (std::size_t score = 0; score < totalScores.size(); ++score) {
+      totalScores[score] -= line.scores[score];
+    }
+
+    if (previous == Piece::BLACK) {
+      line.black &= static_cast<std::uint16_t>(~reference.bit);
+    } else if (previous == Piece::WHITE) {
+      line.white &= static_cast<std::uint16_t>(~reference.bit);
+    }
+    if (piece == Piece::BLACK) {
+      line.black |= reference.bit;
+    } else if (piece == Piece::WHITE) {
+      line.white |= reference.bit;
+    }
+
+    recomputeLine(reference.line);
+    for (std::size_t score = 0; score < totalScores.size(); ++score) {
+      totalScores[score] += line.scores[score];
+    }
+  }
+
+  const ZobristKeys& keys = zobristKeys();
+  const std::size_t cellIndex = static_cast<std::size_t>(x * kBoardSize + y);
+  if (previous != Piece::EMPTY) {
+    positionHash ^= keys.pieces[cellIndex][playerIndex(previous)];
+  }
+  if (piece != Piece::EMPTY) {
+    positionHash ^= keys.pieces[cellIndex][playerIndex(piece)];
+  }
+  board.placePiece(x, y, piece);
+}
+
+Gomoku::Score Gomoku::totalScore(Piece player, PatternTurn patternTurn) const
+{
+  return totalScores[scoreIndex(player, patternTurn)];
+}
+
+Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
+{
+  const Piece opponent = otherPlayer(current);
+  const Score beforeScore = totalScore(current, PatternTurn::OPPONENT_TO_MOVE) +
+                            totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE);
+  const Board::Bitboard candidates = board.frontier(frontierRadius);
+  MoveList result;
+  bool foundWinningMove = false;
+
+  for (std::size_t wordIndex = 0; wordIndex < candidates.size(); ++wordIndex) {
+    std::uint64_t word = candidates[wordIndex];
+    while (word != 0) {
+      const int bitIndex = static_cast<int>(std::countr_zero(word));
+      word &= word - 1;
+      const int padded = static_cast<int>(wordIndex * 64 + bitIndex);
+      const int x = padded / kBoardStride;
+      const int y = padded % kBoardStride;
+
+      setPieceInternal(x, y, current);
+      if (singlePieceWinner(x, y)) {
+        setPieceInternal(x, y, Piece::EMPTY);
+        if (!foundWinningMove) {
+          result.size = 0;
+          foundWinningMove = true;
+        }
+        result.moves[result.size++] = {.score = kMateScore,
+                                       .x = static_cast<std::uint8_t>(x),
+                                       .y = static_cast<std::uint8_t>(y)};
+        continue;
+      }
+      const Score currentScore = totalScore(current, PatternTurn::OPPONENT_TO_MOVE);
+      setPieceInternal(x, y, Piece::EMPTY);
+
+      if (foundWinningMove) {
+        continue;
+      }
+
+      setPieceInternal(x, y, opponent);
+      const Score score = singlePieceWinner(x, y)
+                              ? kMateScore
+                              : currentScore +
+                                    totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE) -
+                                    beforeScore;
+      setPieceInternal(x, y, Piece::EMPTY);
+
+      result.moves[result.size++] = {
+          .score = score, .x = static_cast<std::uint8_t>(x), .y = static_cast<std::uint8_t>(y)};
+    }
+  }
+
+  std::sort(result.moves.begin(), result.moves.begin() + static_cast<std::ptrdiff_t>(result.size),
+            [](const ScoredMove& lhs, const ScoredMove& rhs) { return lhs.score > rhs.score; });
+  return result;
+}
+
+void Gomoku::shuffleEqualMoves(MoveList& moves, Piece next, std::uint64_t seed) const
+{
+  std::uint64_t randomState = seed ^ positionHash ^
+                              zobristKeys().sideToMove[playerIndex(next)];
+  for (std::size_t groupBegin = 0; groupBegin < moves.size;) {
+    std::size_t groupEnd = groupBegin + 1;
+    while (groupEnd < moves.size && moves.moves[groupEnd].score == moves.moves[groupBegin].score) {
+      ++groupEnd;
+    }
+    for (std::size_t index = groupEnd; index > groupBegin + 1; --index) {
+      const std::size_t selected =
+          groupBegin + static_cast<std::size_t>(splitMix64(randomState) % (index - groupBegin));
+      std::swap(moves.moves[index - 1], moves.moves[selected]);
+    }
+    groupBegin = groupEnd;
+  }
+}
+
+Gomoku::ScoreXY Gomoku::parallelRootSearch(int depth, Piece next, int frontierRadius,
+                                           unsigned int threadCount, std::uint64_t seed)
+{
+  MoveList moves = genBestMoves(next, frontierRadius);
+  if (moves.size == 0) {
+    return std::make_tuple(0, -1, -1);
+  }
+
+  // Keep stronger tactical ordering intact, but vary the order of moves with
+  // exactly the same root evaluation. Search ties are resolved by first move.
+  shuffleEqualMoves(moves, next, seed);
+
+  std::array<Score, kMaximumMoveCount> values{};
+  values.fill(-kInfinity);
+
+  const int firstX = moves.moves[0].x;
+  const int firstY = moves.moves[0].y;
+  setPieceInternal(firstX, firstY, next);
+  const auto firstScore =
+      negaMax(depth - 1, -kInfinity, kInfinity, otherPlayer(next), firstX, firstY, frontierRadius);
+  values[0] = -std::get<0>(firstScore);
+  setPieceInternal(firstX, firstY, Piece::EMPTY);
+
+  std::atomic<std::size_t> nextMove{1};
+  std::atomic<Score> sharedAlpha{values[0]};
+  const unsigned int workers =
+      std::min({threadCount, static_cast<unsigned int>(moves.size), kMaximumRootThreads,
+                availableSearchThreadCount()});
+
+  const auto searchMoves = [this, &moves, &values, &nextMove, &sharedAlpha, depth, next,
+                            frontierRadius](bool beginThreadSearch) {
+    Gomoku worker = *this;
+    if (beginThreadSearch) {
+      transpositionTable.beginSearch();
+    }
+
+    while (true) {
+      const std::size_t moveIndex = nextMove.fetch_add(1, std::memory_order_relaxed);
+      if (moveIndex >= moves.size) {
+        return;
+      }
+
+      const int x = moves.moves[moveIndex].x;
+      const int y = moves.moves[moveIndex].y;
+      const Score alpha = sharedAlpha.load(std::memory_order_relaxed);
+      worker.setPieceInternal(x, y, next);
+      const auto child =
+          worker.negaMax(depth - 1, -kInfinity, -alpha, otherPlayer(next), x, y, frontierRadius);
+      const Score value = -std::get<0>(child);
+      worker.setPieceInternal(x, y, Piece::EMPTY);
+      values[moveIndex] = value;
+
+      Score current = sharedAlpha.load(std::memory_order_relaxed);
+      while (value > current &&
+             !sharedAlpha.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+      }
+    }
+  };
+
+  std::vector<std::future<void>> futures;
+  futures.reserve(workers > 0 ? workers - 1 : 0);
+  for (unsigned int worker = 1; worker < workers; ++worker) {
+    futures.emplace_back(std::async(std::launch::async, searchMoves, true));
+  }
+  searchMoves(false);
+  for (auto& future : futures) {
+    future.get();
+  }
+
+  int bestX = firstX;
+  int bestY = firstY;
+  Score bestValue = values[0];
+  for (std::size_t moveIndex = 1; moveIndex < moves.size; ++moveIndex) {
+    if (values[moveIndex] > bestValue) {
+      bestValue = values[moveIndex];
+      bestX = moves.moves[moveIndex].x;
+      bestY = moves.moves[moveIndex].y;
+    }
+  }
+
+  const std::uint64_t key = positionHash ^ zobristKeys().sideToMove[playerIndex(next)];
+  transpositionTable.store(key, depth, bestValue, BoundType::EXACT, bestX, bestY);
+  return std::make_tuple(bestValue, bestX, bestY);
+}
+
+Gomoku::ScoreXY Gomoku::negaMax(int depth, Score alpha, Score beta, Piece next, int lastX,
+                                int lastY, int frontierRadius,
+                                std::optional<std::uint64_t> rootSeed)
+{
+  if (lastX >= 0 && singlePieceWinner(lastX, lastY)) {
+    return std::make_tuple(-kMateScore - depth, -1, -1);
+  }
+
+  const std::uint64_t key = positionHash ^ zobristKeys().sideToMove[playerIndex(next)];
+  const Score originalAlpha = alpha;
+  const Score originalBeta = beta;
+  int tableX = -1;
+  int tableY = -1;
+  if (const TranspositionEntry* entry = transpositionTable.find(key)) {
+    tableX = entry->bestX;
+    tableY = entry->bestY;
+    if (entry->depth >= depth) {
+      if (entry->bound == BoundType::EXACT) {
+        return std::make_tuple(entry->value, tableX, tableY);
+      }
+      if (entry->bound == BoundType::LOWER) {
+        alpha = std::max(alpha, entry->value);
+      } else {
+        beta = std::min(beta, entry->value);
+      }
+      if (alpha >= beta) {
+        return std::make_tuple(entry->value, tableX, tableY);
+      }
+    }
+  }
+
+  if (depth == 0) {
+    const Piece opponent = otherPlayer(next);
+    const Score value = totalScore(next, PatternTurn::OWNER_TO_MOVE) -
+                        totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE);
+    transpositionTable.store(key, depth, value, BoundType::EXACT, -1, -1);
+    return std::make_tuple(value, -1, -1);
+  }
+
+  MoveList moves = genBestMoves(next, frontierRadius);
+  if (moves.size == 0) {
+    transpositionTable.store(key, depth, 0, BoundType::EXACT, -1, -1);
+    return std::make_tuple(0, -1, -1);
+  }
+  if (rootSeed) {
+    shuffleEqualMoves(moves, next, *rootSeed);
+  }
+
+  if (tableX >= 0 && tableY >= 0) {
+    const auto tableMove = std::find_if(
+        moves.moves.begin(), moves.moves.begin() + static_cast<std::ptrdiff_t>(moves.size),
+        [tableX, tableY](const ScoredMove& move) { return move.x == tableX && move.y == tableY; });
+    if (tableMove != moves.moves.begin() + static_cast<std::ptrdiff_t>(moves.size)) {
+      std::iter_swap(moves.moves.begin(), tableMove);
+    }
+  }
+
+  int bestX = -1;
+  int bestY = -1;
+  Score bestValue = -kInfinity;
+  for (std::size_t moveIndex = 0; moveIndex < moves.size; ++moveIndex) {
+    const int x = moves.moves[moveIndex].x;
+    const int y = moves.moves[moveIndex].y;
+    setPieceInternal(x, y, next);
+    const auto nextScore =
+        negaMax(depth - 1, -beta, -alpha, otherPlayer(next), x, y, frontierRadius);
+    const Score value = -std::get<0>(nextScore);
+    setPieceInternal(x, y, Piece::EMPTY);
+
+    if (value > bestValue) {
+      bestX = x;
+      bestY = y;
+      bestValue = value;
+    }
+    alpha = std::max(alpha, value);
+    if (beta <= alpha) {
+      break;
+    }
+  }
+
+  const BoundType bound = bestValue <= originalAlpha  ? BoundType::UPPER
+                          : bestValue >= originalBeta ? BoundType::LOWER
+                                                      : BoundType::EXACT;
+  transpositionTable.store(key, depth, bestValue, bound, bestX, bestY);
+  return std::make_tuple(bestValue, bestX, bestY);
+}
+
+Piece Gomoku::checkWinner() const
+{
+  for (const LineState& line : lines) {
+    if (containsFive(line.black)) {
+      return Piece::BLACK;
+    }
+    if (containsFive(line.white)) {
+      return Piece::WHITE;
+    }
+  }
+  return Piece::EMPTY;
+}
+
+int Gomoku::singlePieceWinner(int x, int y) const
+{
+  const Piece piece = board.getPiece(x, y);
+  if (piece == Piece::EMPTY) {
+    return static_cast<int>(Piece::EMPTY);
+  }
+
+  const CellGeometry& cell = lineGeometry().cells[static_cast<std::size_t>(x * kBoardSize + y)];
+  for (int referenceIndex = 0; referenceIndex < cell.count; ++referenceIndex) {
+    const CellLineReference& reference = cell.references[static_cast<std::size_t>(referenceIndex)];
+    const LineState& line = lines[reference.line];
+    const std::uint16_t mask = piece == Piece::BLACK ? line.black : line.white;
+    int count = 1;
+    for (std::uint16_t bit = static_cast<std::uint16_t>(reference.bit << 1);
+         bit != 0 && (mask & bit) != 0; bit = static_cast<std::uint16_t>(bit << 1)) {
+      ++count;
+    }
+    for (std::uint16_t bit = static_cast<std::uint16_t>(reference.bit >> 1);
+         bit != 0 && (mask & bit) != 0; bit = static_cast<std::uint16_t>(bit >> 1)) {
+      ++count;
+    }
+    if (count >= 5) {
+      return static_cast<int>(piece);
+    }
+  }
+  return static_cast<int>(Piece::EMPTY);
+}
+
+std::ostream& operator<<(std::ostream& stream, const Gomoku& gomoku)
+{
+  stream << "Player " << static_cast<int>(gomoku.turn) << "'s turn\n";
+  stream << gomoku.board << '\n';
+  return stream;
+}
+
+}  // namespace gomoku

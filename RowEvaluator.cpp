@@ -1,147 +1,89 @@
-#include <iostream>
-#include "BitRowBuilder.h"
-#include <string>
-#include <map>
-#include <fstream>
-#include <sstream>
-#include <vector>
-#include <algorithm>
 #include "RowEvaluator.h"
 
-using namespace std;
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
 
-RowEvaluator::RowEvaluator() {
-	rowEval1 = vector<int>(1 << 16, -1);
-	rowEval2 = vector<int>(1 << 16, -1);
+namespace gomoku {
+
+RowEvaluator::RowEvaluator()
+{
+  reset();
 }
 
-vector<int> RowEvaluator::initDP(int row) {
-	int len = BitRowBuilder::LengthOf(row);
-	vector<int> dp(len, -1);
-	for (int i = 0; i < maxPatLen; i++) {
-		dp.push_back(0);
-	}
-	return dp;
+void RowEvaluator::reset()
+{
+  patterns.clear();
+  tables = std::make_shared<EvaluationTables>();
 }
 
-// optimize for a for loop version?
-int RowEvaluator::rowDP(int row,vector<int>& dp,int idx,bool type) {
-	int curMax = 0;
-	BitRowBuilder rowBuilder(row);
-	
-	//assuming the shortest pattern has length 2
-	if (rowBuilder.length() < 2) {
-		dp[idx] = 0;
-		return 0;
-	}
-	if (dp[idx] != -1)
-		return dp[idx];
+EvaluationTablesPtr RowEvaluator::loadPatterns(const std::string& patternFile)
+{
+  reset();
+  std::ifstream input(patternFile);
+  if (!input) {
+    throw std::runtime_error("Unable to open pattern file: " + patternFile);
+  }
 
-	if (!rowBuilder.isSet(0) && !rowBuilder.isSet(1)) {
-		return rowDP(BitRowBuilder::RowSplice(row, 1), dp, idx + 1, type);
-	}
+  std::string line;
+  std::size_t lineNumber = 0;
+  while (std::getline(input, line)) {
+    ++lineNumber;
+    const auto isWhitespace = [](char character) {
+      return std::isspace(static_cast<unsigned char>(character)) != 0;
+    };
+    const auto firstContent = std::find_if_not(line.begin(), line.end(), isWhitespace);
+    if (firstContent == line.end() || *firstContent == '#') {
+      continue;
+    }
 
-	map<int, int>& evalMap = type ? patternEvalMap1 : patternEvalMap2;
+    std::string patternDefinition = line;
+    const std::size_t comment = patternDefinition.find('#');
+    if (comment != std::string::npos) {
+      if (comment == 0 || !isWhitespace(patternDefinition[comment - 1])) {
+        throw std::runtime_error("Invalid pattern line " + std::to_string(lineNumber) +
+                                 " in " + patternFile + ": " + line);
+      }
+      patternDefinition.erase(comment);
+    }
 
-	for (auto& kvp : evalMap) {
-		int pattern = kvp.first;
-		int patternEval = kvp.second;
-		int patternLen = BitRowBuilder::LengthOf(pattern);
-		if (BitRowBuilder::RowStartsWith(row, pattern)) {
-			int curVal = patternEval +
-				rowDP(BitRowBuilder::RowSplice(row, patternLen), dp, idx + patternLen, type);
-			curMax = max(curVal, curMax);
-		}
-		int reversePattern = BitRowBuilder::GetReverse(pattern);
-		if (BitRowBuilder::RowStartsWith(row, reversePattern)) {
-			int curVal = patternEval +
-				rowDP(BitRowBuilder::RowSplice(row, patternLen), dp, idx + patternLen, type);
-			curMax = max(curVal, curMax);
-		}
-	}
+    std::istringstream lineStream(patternDefinition);
+    std::string pattern;
+    int opponentToMove = 0;
+    int ownerToMove = 0;
+    if (!(lineStream >> pattern >> opponentToMove >> ownerToMove)) {
+      throw std::runtime_error("Invalid pattern line " + std::to_string(lineNumber) +
+                               " in " + patternFile + ": " + line);
+    }
+    lineStream >> std::ws;
 
-	int curVal = rowDP(BitRowBuilder::RowSplice(row, 1), dp, idx + 1, type);
-	curMax = max(curVal, curMax);
+    if (pattern.size() > kMaximumEncodedRowLength ||
+        !std::all_of(pattern.begin(), pattern.end(),
+                     [](char bit) { return bit == '0' || bit == '1'; }) ||
+        opponentToMove < 0 || ownerToMove < 0 || !lineStream.eof()) {
+      throw std::runtime_error("Invalid pattern line " + std::to_string(lineNumber) +
+                               " in " + patternFile + ": " + line);
+    }
 
-	dp[idx] = curMax;
+    const EvaluationPattern value =
+        pattern_cache::makePattern(pattern, opponentToMove, ownerToMove);
+    const auto existing = std::find_if(
+        patterns.begin(), patterns.end(), [&value](const auto& existingPattern) {
+          return existingPattern.pattern == value.pattern;
+        });
+    if (existing == patterns.end()) {
+      patterns.push_back(value);
+    } else {
+      *existing = value;
+    }
+  }
 
-	return curMax;
+  auto suffixTables = std::make_unique<EvaluationTables>();
+  pattern_cache::generate(patterns, *suffixTables, *tables);
+
+  return tables;
 }
 
-
-
-int RowEvaluator::genEvalForRow(int row, bool type) {
-
-#define SAVERET(r) {type?rowEval1[row]=r:rowEval2[row]=r; return r;}
-
-	if (row <= (1 << 5)) {
-		SAVERET(0);
-	}
-	for (int i = 1; i < 17; i++) {
-		if (row == (1 << i)){
-			SAVERET(0);
-		}
-	}
-
-	//reverse row has the same eval
-	int revRow = BitRowBuilder::GetReverse(row);
-	if (type) {
-		if (rowEval1[revRow] != -1) {
-			SAVERET(rowEval1[revRow]);
-		}
-	}
-	if (!type) {
-		if (rowEval2[revRow] != -1) {
-			SAVERET(rowEval2[revRow]);
-		}
-	}
-
-	auto forwardDP = initDP(row);
-	auto backwardDP = initDP(revRow);
-
-	int forwardEval = rowDP(row, forwardDP, 0, type);
-	int backwardEval = rowDP(revRow, backwardDP, 0, type);
-
-	int ret = max(forwardEval, backwardEval);
-
-	SAVERET(ret);
-}
-
-
-void RowEvaluator::setPatterns(const string& patternFile, vector<int>& retRowEval1, vector<int>& retRowEval2) {
-	
-
-	//cout << "Evaluating..." << endl;
-	ifstream fin(patternFile);
-	string pattern;
-	int eval1;
-	int eval2;
-	string line;
-	while (getline(fin,line)) {
-		stringstream ss;
-		ss << line;
-		ss >> pattern;
-		ss >> eval1;
-		ss >> eval2;
-
-		//add 1 so leading 0 don't get thrown away
-		//because they do matter
-		pattern = "1" + pattern;
-
-		maxPatLen = max(maxPatLen, (int)pattern.size() - 1);
-
-		int intPat = std::stoi(pattern, nullptr, 2);
-		patternEvalMap1[intPat]= eval1;
-		patternEvalMap2[intPat]= eval2;
-	}
-
-
-	for (int i = 0; i < (1 << 16); i++) {
-		genEvalForRow(i, true);
-		genEvalForRow(i, false);
-	}
-
-	retRowEval1 = rowEval1;
-	retRowEval2 = rowEval2;
-
-}
+}  // namespace gomoku

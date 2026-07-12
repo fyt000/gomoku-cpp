@@ -1,122 +1,108 @@
 #include "BitRowBuilder.h"
 
-#ifdef _MSC_VER
-#include <intrin.h>
-typedef unsigned long DWORD;
-#endif
+#include <bit>
 
-BitRowBuilder::BitRowBuilder()
-{
-	row = EMPTYROW;
-}
+namespace gomoku {
 
-BitRowBuilder::BitRowBuilder(int r)
-{
-	row = r;
-	lenDirty = true;
-}
+BitRowBuilder::BitRowBuilder() = default;
 
-int BitRowBuilder::getRow()
+BitRowBuilder::BitRowBuilder(std::uint16_t row) : row(row), lenDirty(true) {}
+
+std::uint16_t BitRowBuilder::getRow() const
 {
-	return row;
+  return row;
 }
 
 void BitRowBuilder::reset()
 {
-	row = EMPTYROW;
+  row = kEmptyRow;
+  len = 0;
+  lenDirty = false;
 }
 
-BitRowBuilder& BitRowBuilder::add(bool isEmpty)
+BitRowBuilder& BitRowBuilder::appendCell(bool isSelfStone)
 {
-	row <<= 1;
-	row ^= (isEmpty ? 0 : 1);
-	lenDirty = true;
-	return (*this);
+  return appendBit(isSelfStone ? 1 : 0);
 }
 
-BitRowBuilder & BitRowBuilder::add(int b)
+BitRowBuilder& BitRowBuilder::appendBit(int bit)
 {
-	row <<= 1;
-	row ^= b;
-	lenDirty = true;
-	return (*this);
+  if (LengthOf(row) >= 15) {
+    return *this;
+  }
+  row = static_cast<std::uint16_t>((row << 1) | (bit & 1));
+  lenDirty = true;
+  return *this;
 }
 
 int BitRowBuilder::length()
 {
-	if (lenDirty) {
-		len = LengthOf(row);
-	}
-	return len;
+  if (lenDirty) {
+    len = LengthOf(row);
+    lenDirty = false;
+  }
+  return len;
 }
 
 void BitRowBuilder::inplaceReverse()
 {
-	row = GetReverse(row);
+  row = GetReverse(row);
+  lenDirty = true;
 }
 
-bool BitRowBuilder::isSet(int idx)
+bool BitRowBuilder::isSet(int index)
 {
-	return (row & (1 << (length() - 1 - idx))) != 0;
+  const int rowLength = length();
+  return index >= 0 && index < rowLength &&
+         (row & (std::uint16_t{1} << (rowLength - 1 - index))) != 0;
 }
 
-bool BitRowBuilder::IsSet(int someRow, int idx)
+bool BitRowBuilder::IsSet(std::uint16_t row, int index)
 {
-	return (someRow & (1 << (LengthOf(someRow) - 1 - idx))) != 0;
+  const int rowLength = LengthOf(row);
+  return index >= 0 && index < rowLength &&
+         (row & (std::uint16_t{1} << (rowLength - 1 - index))) != 0;
 }
 
-int BitRowBuilder::RowSplice(int someRow, int idx)
+std::uint16_t BitRowBuilder::RowSplice(std::uint16_t row, int index)
 {
-	int startLen = LengthOf(someRow);
-	someRow &= ~(1 << startLen);
-	for (int i = 0; i < idx; i++) {
-		someRow &= ~(1 << (startLen - 1 - i));
-	}
-	someRow |= 1 << (startLen - idx);
-	return someRow;
+  const int startLen = LengthOf(row);
+  if (index < 0 || index > startLen) {
+    return row;
+  }
+  const int remaining = startLen - index;
+  const std::uint16_t remainingMask =
+      remaining == 0 ? 0 : static_cast<std::uint16_t>((std::uint32_t{1} << remaining) - 1);
+  return static_cast<std::uint16_t>((row & remainingMask) | (std::uint16_t{1} << remaining));
 }
 
-bool BitRowBuilder::RowStartsWith(int someRow, int p)
+bool BitRowBuilder::RowStartsWith(std::uint16_t row, std::uint16_t pattern)
 {
-	int len1 = LengthOf(someRow) + 1;
-	int len2 = LengthOf(p) + 1;
-	if (len1 < len2)
-		return false;
-	return (someRow >> (len1 - len2)) == p;
+  const int rowLength = LengthOf(row) + 1;
+  const int patternLength = LengthOf(pattern) + 1;
+  if (rowLength < patternLength) {
+    return false;
+  }
+  return (row >> (rowLength - patternLength)) == pattern;
 }
 
-int BitRowBuilder::GetReverse(int someRow)
+std::uint16_t BitRowBuilder::GetReverse(std::uint16_t row)
 {
-	int rlen = LengthOf(someRow);
-	int backwardRow = EMPTYROW;
-	for (int i = 0; i < rlen; i++) {
-		if ((someRow & (1 << i)) != 0) {
-			backwardRow = (backwardRow << 1) ^ 1;
-		}
-		else {
-			backwardRow = (backwardRow << 1);
-		}
-	}
-	return backwardRow;
+  const int rowLength = LengthOf(row);
+  std::uint16_t reversedRow = kEmptyRow;
+  for (int i = 0; i < rowLength; ++i) {
+    reversedRow = static_cast<std::uint16_t>((reversedRow << 1) |
+                                             ((row & (std::uint16_t{1} << i)) != 0 ? 1 : 0));
+  }
+  return reversedRow;
 }
 
-int BitRowBuilder::LengthOf(int anotherRow)
+int BitRowBuilder::LengthOf(std::uint16_t row)
 {
-	if (anotherRow == 0)
-		return 0;
-
-	int minToOne = 0;
-#ifdef _MSC_VER
-	DWORD leadingZero = 0;
-	_BitScanReverse(&leadingZero, anotherRow);
-	minToOne = leadingZero;
-#elif __GNUC__
-	minToOne = 31 - __builtin_clz(anotherRow);
-#else
-	int v = anotherRow;
-	while (v >>= 1) {
-		minToOne++;
-	}
-#endif
-	return minToOne;
+  if (row == 0) {
+    return 0;
+  }
+  return static_cast<int>(std::bit_width(row)) - 1;
 }
+
+}  // namespace gomoku

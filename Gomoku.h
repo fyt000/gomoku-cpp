@@ -1,64 +1,123 @@
 #pragma once
-#include <iostream>
-#include "Board.h"
-#include <vector>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <iosfwd>
+#include <optional>
 #include <tuple>
+#include <utility>
 
-// not implementing score/weight lookup...
-// will add the other script that does it
-class Gomoku {
-	typedef std::tuple<int, int, int> ScoreXY;
-public:
-	Gomoku();
-	Gomoku(const std::vector<int> &patternLookup1, const std::vector<int> &patternLookup2);
+#include "Board.h"
+#include "EvaluationTables.h"
 
-	template<int R, int C>
-	void setBoard(Piece(&board)[R][C])
-	{
-		//c++11 is good
-		this->board = Board(board);
+namespace gomoku {
 
-		//pass in the turn value.
-		int pieceCount = 0;
-		for (int i = 0; i < 15;i++) {
-			for (int j=0;j<15;j++){
-				auto p = board[i][j];
-				switch (p) {
-				case Piece::WHITE :
-					pieceCount -= 1; break;
-				case Piece::BLACK:
-					pieceCount += 1; break;
-				}
-			}
-		}
-		if (pieceCount < 0) {
-			turn = Piece::BLACK;
-            std::cerr<<"black going"<<std::endl;
-		}
-		else {
-			turn = Piece::WHITE;
-            std::cerr<<"white going"<<std::endl;
-		}
-		//std::cerr<< turn<<std::endl;
-	}
-
-	bool placePiece(int x,int y);
-	std::pair<int,int> placePiece();
-	int checkWinner();
-	friend std::ostream& operator<< (std::ostream& stream, const Gomoku& gomoku);
-
-private:
-	// int maxScore = 0;
-	// int wonScore;
-	Piece turn = Piece::BLACK;
-	Board board;
-	const std::vector<int> patternLookup1;
-	const std::vector<int> patternLookup2;
-	int evalBoard(Piece player, bool isOddStep);
-	int rowEval(int sx, int sy, int dx, int dy, Piece pType, bool isOddStep);
-	int subRowEval(int subRow, bool isOddStep);
-	Piece otherPlayer(Piece p);
-	std::vector<ScoreXY> genBestMoves(Piece cur);
-	ScoreXY negaMax(int depth, int alpha, int beta, Piece start, Piece next);
-	int singlePieceWinner(int x, int y);
+struct SearchOptions {
+  int depth = 4;
+  // Candidate cells within this Chebyshev distance of existing stones.
+  // Values are clamped to 1-4; radius two is the recommended default.
+  int frontierRadius = 2;
+  // Parallelizes root moves. Values are clamped to the available CPU core
+  // count and to eight, bounding per-thread transposition-table memory.
+  unsigned int threadCount = 1;
+  // Equal root evaluations are resolved deterministically from this seed and
+  // the current position. When omitted, a seed is generated for this search.
+  std::optional<std::uint64_t> seed;
 };
+
+[[nodiscard]] std::uint64_t generateRandomSeed();
+
+class Gomoku {
+  using Score = std::int64_t;
+  using ScoreXY = std::tuple<Score, int, int>;
+
+  static constexpr std::size_t kUsefulLineCount = 72;
+  static constexpr std::size_t kMaximumMoveCount = kBoardSize * kBoardSize;
+
+  struct LineState {
+    std::uint16_t black = 0;
+    std::uint16_t white = 0;
+    std::array<Score, 4> scores{};
+  };
+
+  struct ScoredMove {
+    Score score = 0;
+    std::uint8_t x = 0;
+    std::uint8_t y = 0;
+  };
+
+  struct MoveList {
+    std::array<ScoredMove, kMaximumMoveCount> moves{};
+    std::size_t size = 0;
+  };
+
+ public:
+  Gomoku();
+  explicit Gomoku(EvaluationTablesPtr evaluationTables);
+
+  template <int Rows, int Columns>
+  void setBoard(Piece (&cells)[Rows][Columns])
+  {
+    static_assert(Rows == kBoardSize && Columns == kBoardSize,
+                  "Board dimensions must be 15 by 15.");
+    board = Board(cells);
+
+    int pieceBalance = 0;
+    for (int row = 0; row < kBoardSize; ++row) {
+      for (int column = 0; column < kBoardSize; ++column) {
+        switch (cells[row][column]) {
+          case Piece::WHITE:
+            --pieceBalance;
+            break;
+          case Piece::BLACK:
+            ++pieceBalance;
+            break;
+          case Piece::EMPTY:
+            break;
+        }
+      }
+    }
+    turn = pieceBalance <= 0 ? Piece::BLACK : Piece::WHITE;
+    rebuildDerivedState();
+  }
+
+  bool placePiece(int x, int y);
+  [[nodiscard]] std::pair<int, int> placePiece();
+  [[nodiscard]] std::pair<int, int> placePiece(int searchDepth);
+  [[nodiscard]] std::pair<int, int> placePiece(SearchOptions options);
+  void reset();
+  [[nodiscard]] Piece checkWinner() const;
+  [[nodiscard]] Piece getPiece(int x, int y) const;
+  [[nodiscard]] Piece currentTurn() const;
+  [[nodiscard]] bool isBoardFull() const;
+
+  friend std::ostream& operator<<(std::ostream& stream, const Gomoku& gomoku);
+
+ private:
+  Piece turn = Piece::BLACK;
+  Board board;
+  EvaluationTablesPtr evaluationTables;
+  std::array<LineState, kUsefulLineCount> lines{};
+  std::array<Score, 4> totalScores{};
+  std::uint64_t positionHash = 0;
+
+  [[nodiscard]] static Piece otherPlayer(Piece piece);
+  [[nodiscard]] static int playerIndex(Piece piece);
+  [[nodiscard]] static std::size_t scoreIndex(Piece piece, PatternTurn patternTurn);
+  [[nodiscard]] Score subRowEval(int subRow, PatternTurn patternTurn) const;
+  void recomputeLine(std::size_t lineIndex);
+  void rebuildDerivedState();
+  void setPieceInternal(int x, int y, Piece piece);
+  [[nodiscard]] Score totalScore(Piece player, PatternTurn patternTurn) const;
+  [[nodiscard]] MoveList genBestMoves(Piece current, int frontierRadius);
+  void shuffleEqualMoves(MoveList& moves, Piece next, std::uint64_t seed) const;
+  [[nodiscard]] ScoreXY parallelRootSearch(int depth, Piece next, int frontierRadius,
+                                           unsigned int threadCount, std::uint64_t seed);
+  [[nodiscard]] ScoreXY negaMax(int depth, Score alpha, Score beta, Piece next, int lastX,
+                                int lastY, int frontierRadius,
+                                std::optional<std::uint64_t> rootSeed = std::nullopt);
+  [[nodiscard]] int singlePieceWinner(int x, int y) const;
+};
+
+}  // namespace gomoku

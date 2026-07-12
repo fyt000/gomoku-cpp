@@ -1,25 +1,24 @@
 #pragma once
 
-#include <vector>
-#include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-class RowEvaluator
-{
-public:
+#include "EvaluationTables.h"
+#include "PatternCacheGenerator.h"
+
+namespace gomoku {
+
+class RowEvaluator {
+ public:
   RowEvaluator();
-  void setPatterns(const std::string &patternFile, std::vector<int> &retRowEval1, std::vector<int> &retRowEval2);
+ [[nodiscard]] EvaluationTablesPtr loadPatterns(const std::string& patternFile);
 
-private:
-  int genEvalForRow(int row, bool type);
-  int rowDP(int row, std::vector<int> &dp, int idx, bool type);
-  std::vector<int> initDP(int row);
+ private:
+  void reset();
 
-  int maxPatLen = 0;
-
-  std::map<int, int> patternEvalMap1;
-  std::map<int, int> patternEvalMap2;
-
-  std::vector<int> rowEval1;
-  std::vector<int> rowEval2;
+  std::vector<EvaluationPattern> patterns;
+  std::shared_ptr<EvaluationTables> tables;
 };
+
+}  // namespace gomoku
