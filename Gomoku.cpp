@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "CompiledEvaluationTables.h"
+
 namespace gomoku {
 
 namespace {
@@ -205,18 +207,12 @@ bool containsFive(std::uint16_t mask)
 
 }  // namespace
 
-Gomoku::Gomoku() : Gomoku(zeroEvaluationTables()) {}
+Gomoku::Gomoku() : Gomoku(compiledEvaluationTables()) {}
 
 Gomoku::Gomoku(EvaluationTablesPtr evaluationTables)
-    : evaluationTables(evaluationTables ? std::move(evaluationTables) : zeroEvaluationTables())
+    : evaluationTables(evaluationTables ? std::move(evaluationTables) : compiledEvaluationTables())
 {
   rebuildDerivedState();
-}
-
-EvaluationTablesPtr Gomoku::zeroEvaluationTables()
-{
-  static const EvaluationTablesPtr tables = std::make_shared<const EvaluationTables>();
-  return tables;
 }
 
 Piece Gomoku::otherPlayer(Piece piece)
@@ -229,9 +225,10 @@ int Gomoku::playerIndex(Piece piece)
   return piece == Piece::WHITE ? 1 : 0;
 }
 
-std::size_t Gomoku::scoreIndex(Piece piece, bool isOddStep)
+std::size_t Gomoku::scoreIndex(Piece piece, PatternTurn patternTurn)
 {
-  return static_cast<std::size_t>(playerIndex(piece) * 2 + (isOddStep ? 0 : 1));
+  return static_cast<std::size_t>(playerIndex(piece) * 2 +
+                                  (patternTurn == PatternTurn::OWNER_TO_MOVE ? 0 : 1));
 }
 
 bool Gomoku::placePiece(int x, int y)
@@ -311,12 +308,14 @@ bool Gomoku::isBoardFull() const
   return board.isFull();
 }
 
-Gomoku::Score Gomoku::subRowEval(int subRow, bool isOddStep) const
+Gomoku::Score Gomoku::subRowEval(int subRow, PatternTurn patternTurn) const
 {
   if (subRow <= (1 << 5)) {
     return 0;
   }
-  const auto& lookup = isOddStep ? evaluationTables->oddStep : evaluationTables->evenStep;
+  const auto& lookup = patternTurn == PatternTurn::OWNER_TO_MOVE
+                           ? evaluationTables->ownerToMove
+                           : evaluationTables->opponentToMove;
   return lookup[static_cast<std::size_t>(subRow)];
 }
 
@@ -329,8 +328,10 @@ void Gomoku::recomputeLine(std::size_t lineIndex)
   int whiteRow = 1;
 
   const auto finishSubRow = [this, &line](Piece player, int subRow) {
-    line.scores[scoreIndex(player, true)] += subRowEval(subRow, true);
-    line.scores[scoreIndex(player, false)] += subRowEval(subRow, false);
+    line.scores[scoreIndex(player, PatternTurn::OWNER_TO_MOVE)] +=
+        subRowEval(subRow, PatternTurn::OWNER_TO_MOVE);
+    line.scores[scoreIndex(player, PatternTurn::OPPONENT_TO_MOVE)] +=
+        subRowEval(subRow, PatternTurn::OPPONENT_TO_MOVE);
   };
 
   for (int offset = 0; offset < length; ++offset) {
@@ -437,15 +438,16 @@ void Gomoku::setPieceInternal(int x, int y, Piece piece)
   board.placePiece(x, y, piece);
 }
 
-Gomoku::Score Gomoku::totalScore(Piece player, bool isOddStep) const
+Gomoku::Score Gomoku::totalScore(Piece player, PatternTurn patternTurn) const
 {
-  return totalScores[scoreIndex(player, isOddStep)];
+  return totalScores[scoreIndex(player, patternTurn)];
 }
 
 Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
 {
   const Piece opponent = otherPlayer(current);
-  const Score beforeScore = totalScore(current, true) + totalScore(opponent, true);
+  const Score beforeScore = totalScore(current, PatternTurn::OPPONENT_TO_MOVE) +
+                            totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE);
   const Board::Bitboard candidates = board.frontier(frontierRadius);
   MoveList result;
 
@@ -467,11 +469,15 @@ Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
         result.size = 1;
         return result;
       }
-      const Score currentScore = totalScore(current, true);
+      const Score currentScore = totalScore(current, PatternTurn::OPPONENT_TO_MOVE);
       setPieceInternal(x, y, Piece::EMPTY);
 
       setPieceInternal(x, y, opponent);
-      const Score score = currentScore + totalScore(opponent, true) - beforeScore;
+      const Score score = singlePieceWinner(x, y)
+                              ? kMateScore
+                              : currentScore +
+                                    totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE) -
+                                    beforeScore;
       setPieceInternal(x, y, Piece::EMPTY);
 
       result.moves[result.size++] = {
@@ -596,7 +602,8 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, Score alpha, Score beta, Piece next, 
 
   if (depth == 0) {
     const Piece opponent = otherPlayer(next);
-    const Score value = totalScore(next, false) - totalScore(opponent, true);
+    const Score value = totalScore(next, PatternTurn::OWNER_TO_MOVE) -
+                        totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE);
     transpositionTable.store(key, depth, value, BoundType::EXACT, -1, -1);
     return std::make_tuple(value, -1, -1);
   }

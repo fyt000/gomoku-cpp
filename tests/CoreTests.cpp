@@ -4,10 +4,13 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 #include "BitRowBuilder.h"
 #include "Board.h"
+#include "CompiledEvaluationTables.h"
 #include "GameSession.h"
 #include "Gomoku.h"
 #include "RowEvaluator.h"
@@ -28,8 +31,8 @@ EvaluationTablesPtr syntheticTables()
     auto values = std::make_shared<EvaluationTables>();
     for (std::size_t row = 0; row < kEncodedRowCount; ++row) {
       const auto encoded = static_cast<std::uint16_t>(row);
-      values->oddStep[row] = static_cast<std::int32_t>(std::popcount(encoded) * 17);
-      values->evenStep[row] = static_cast<std::int32_t>(std::popcount(encoded) * 13);
+      values->opponentToMove[row] = static_cast<std::int32_t>(std::popcount(encoded) * 17);
+      values->ownerToMove[row] = static_cast<std::int32_t>(std::popcount(encoded) * 13);
     }
     return values;
   }();
@@ -49,6 +52,15 @@ int bitboardCount(const Board::Bitboard& bits)
     count += static_cast<int>(std::popcount(word));
   }
   return count;
+}
+
+std::uint16_t encodeRow(std::string_view cells)
+{
+  BitRowBuilder row;
+  for (const char cell : cells) {
+    row.appendBit(cell == '1' ? 1 : 0);
+  }
+  return row.getRow();
 }
 
 Piece naiveWinner(const Piece (&cells)[kBoardSize][kBoardSize])
@@ -233,6 +245,91 @@ TEST_CASE("RowEvaluator rejects patterns longer than the board", "[row-evaluator
   std::filesystem::remove(path);
 }
 
+TEST_CASE("Pattern evaluations distinguish which side moves next", "[row-evaluator][patterns]")
+{
+  const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
+  RowEvaluator evaluator;
+  const EvaluationTablesPtr tables = evaluator.loadPatterns(path.string());
+
+  const std::size_t halfOpenFour = encodeRow("01111");
+  CHECK(tables->opponentToMove[halfOpenFour] == 100);
+  CHECK(tables->ownerToMove[halfOpenFour] == 20000);
+
+  const std::size_t openFour = encodeRow("011110");
+  CHECK(tables->opponentToMove[openFour] == 20000);
+  CHECK(tables->ownerToMove[openFour] == 8000000);
+}
+
+TEST_CASE("Pattern table covers every half-open four shape", "[row-evaluator][patterns]")
+{
+  const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
+  RowEvaluator evaluator;
+  const EvaluationTablesPtr tables = evaluator.loadPatterns(path.string());
+
+  for (const std::string_view pattern : {"01111", "011101", "011011", "010111"}) {
+    CAPTURE(pattern);
+    CHECK(tables->ownerToMove[encodeRow(pattern)] == 20000);
+  }
+}
+
+TEST_CASE("Declared pattern values are not shadowed by their subpatterns",
+          "[row-evaluator][patterns]")
+{
+  const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
+  RowEvaluator evaluator;
+  const EvaluationTablesPtr tables = evaluator.loadPatterns(path.string());
+  std::ifstream input(path);
+  REQUIRE(input);
+
+  std::string line;
+  while (std::getline(input, line)) {
+    std::istringstream lineStream(line);
+    std::string pattern;
+    int opponentToMove = 0;
+    int ownerToMove = 0;
+    if (!(lineStream >> pattern) || pattern.starts_with('#')) {
+      continue;
+    }
+    REQUIRE(lineStream >> opponentToMove >> ownerToMove);
+
+    std::string paddedPattern = pattern;
+    if (paddedPattern.size() < 6) {
+      paddedPattern.insert(0, 6 - paddedPattern.size(), '0');
+    }
+    const std::size_t row = encodeRow(paddedPattern);
+    CAPTURE(pattern);
+    CHECK(tables->opponentToMove[row] == opponentToMove);
+    CHECK(tables->ownerToMove[row] == ownerToMove);
+  }
+}
+
+TEST_CASE("Completed fives are detected by the engine instead of pattern scores",
+          "[row-evaluator][patterns]")
+{
+  const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
+  RowEvaluator evaluator;
+  const EvaluationTablesPtr tables = evaluator.loadPatterns(path.string());
+  const std::size_t five = encodeRow("11111");
+
+  CHECK(tables->opponentToMove[five] == 0);
+  CHECK(tables->ownerToMove[five] == 0);
+}
+
+TEST_CASE("Compile-time and runtime pattern caches are identical",
+          "[row-evaluator][patterns][constexpr]")
+{
+  const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
+  RowEvaluator evaluator;
+  const EvaluationTablesPtr runtimeTables = evaluator.loadPatterns(path.string());
+  const EvaluationTablesPtr& compileTimeTables = compiledEvaluationTables();
+
+  for (std::size_t row = 0; row < kEncodedRowCount; ++row) {
+    CAPTURE(row);
+    REQUIRE(compileTimeTables->opponentToMove[row] == runtimeTables->opponentToMove[row]);
+    REQUIRE(compileTimeTables->ownerToMove[row] == runtimeTables->ownerToMove[row]);
+  }
+}
+
 TEST_CASE("Computer opens at the centre", "[gomoku][engine]")
 {
   Gomoku game(zeroTables());
@@ -276,7 +373,7 @@ TEST_CASE("Computer blocks an opponent's immediate five", "[gomoku][engine]")
   game.setBoard(cells);
 
   REQUIRE(game.currentTurn() == Piece::WHITE);
-  const auto [x, y] = game.placePiece();
+  const auto [x, y] = game.placePiece(SearchOptions{.depth = 1});
   CHECK(x == 7);
   CHECK(y == 8);
   CHECK(game.checkWinner() == Piece::EMPTY);

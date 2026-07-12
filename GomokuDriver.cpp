@@ -2,6 +2,7 @@
 #include <exception>
 #include <iostream>
 
+#include "CompiledEvaluationTables.h"
 #include "Gomoku.h"
 #include "RowEvaluator.h"
 
@@ -19,13 +20,13 @@ void printBoard(const Gomoku& game)
 
 int run(int argc, char** argv)
 {
-  if (argc != 2) {
-    std::cerr << "Usage: gomoku-cpp <pattern-file>\n";
+  if (argc > 2) {
+    std::cerr << "Usage: gomoku-cpp [pattern-file]\n";
     return 1;
   }
 
-  RowEvaluator rowEvaluator;
-  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
+  const EvaluationTablesPtr evaluationTables =
+      argc == 2 ? RowEvaluator{}.loadPatterns(argv[1]) : compiledEvaluationTables();
 
   Gomoku game(evaluationTables);
   printBoard(game);

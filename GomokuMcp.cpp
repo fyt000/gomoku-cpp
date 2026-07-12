@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "CompiledEvaluationTables.h"
 #include "GameSession.h"
 #include "RowEvaluator.h"
 
@@ -279,13 +280,13 @@ void handleRequest(GameSession& game, const Json& request)
 
 int run(int argc, char** argv)
 {
-  if (argc != 2) {
-    std::cerr << "Usage: gomoku-mcp <pattern-file>\n";
+  if (argc > 2) {
+    std::cerr << "Usage: gomoku-mcp [pattern-file]\n";
     return 1;
   }
 
-  RowEvaluator rowEvaluator;
-  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
+  const EvaluationTablesPtr evaluationTables =
+      argc == 2 ? RowEvaluator{}.loadPatterns(argv[1]) : compiledEvaluationTables();
   GameSession game(evaluationTables);
 
   std::string line;

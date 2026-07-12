@@ -96,15 +96,14 @@ class Gomoku {
   std::array<Score, 4> totalScores{};
   std::uint64_t positionHash = 0;
 
-  [[nodiscard]] static EvaluationTablesPtr zeroEvaluationTables();
   [[nodiscard]] static Piece otherPlayer(Piece piece);
   [[nodiscard]] static int playerIndex(Piece piece);
-  [[nodiscard]] static std::size_t scoreIndex(Piece piece, bool isOddStep);
-  [[nodiscard]] Score subRowEval(int subRow, bool isOddStep) const;
+  [[nodiscard]] static std::size_t scoreIndex(Piece piece, PatternTurn patternTurn);
+  [[nodiscard]] Score subRowEval(int subRow, PatternTurn patternTurn) const;
   void recomputeLine(std::size_t lineIndex);
   void rebuildDerivedState();
   void setPieceInternal(int x, int y, Piece piece);
-  [[nodiscard]] Score totalScore(Piece player, bool isOddStep) const;
+  [[nodiscard]] Score totalScore(Piece player, PatternTurn patternTurn) const;
   [[nodiscard]] MoveList genBestMoves(Piece current, int frontierRadius);
   [[nodiscard]] ScoreXY parallelRootSearch(int depth, Piece next, int frontierRadius,
                                            unsigned int threadCount);

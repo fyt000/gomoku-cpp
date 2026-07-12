@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 
+#include "CompiledEvaluationTables.h"
 #include "Gomoku.h"
 #include "RowEvaluator.h"
 
@@ -92,13 +93,13 @@ void handleBoardRequest(const httplib::Request& request, httplib::Response& resp
 
 int run(int argc, char** argv)
 {
-  if (argc != 2) {
-    std::cerr << "Usage: gomoku-server <pattern-file>\n";
+  if (argc > 2) {
+    std::cerr << "Usage: gomoku-server [pattern-file]\n";
     return 1;
   }
 
-  RowEvaluator rowEvaluator;
-  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(argv[1]);
+  const EvaluationTablesPtr evaluationTables =
+      argc == 2 ? RowEvaluator{}.loadPatterns(argv[1]) : compiledEvaluationTables();
 
   httplib::Server server;
   const auto optionsHandler = [](const httplib::Request&, httplib::Response& response) {

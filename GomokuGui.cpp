@@ -11,7 +11,6 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
-#include <filesystem>
 #include <future>
 #include <iostream>
 #include <iterator>
@@ -20,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "CompiledEvaluationTables.h"
 #include "GameSession.h"
 #include "RowEvaluator.h"
 
@@ -451,11 +451,8 @@ int run(int argc, char** argv)
     return 1;
   }
 
-  RowEvaluator rowEvaluator;
-  const std::filesystem::path patternFile =
-      argc == 2 ? std::filesystem::path(argv[1])
-                : std::filesystem::path(argv[0]).parent_path() / "pattern.txt";
-  const EvaluationTablesPtr evaluationTables = rowEvaluator.loadPatterns(patternFile.string());
+  const EvaluationTablesPtr evaluationTables =
+      argc == 2 ? RowEvaluator{}.loadPatterns(argv[1]) : compiledEvaluationTables();
   GameSession game(evaluationTables);
 
   Piece human = Piece::BLACK;
