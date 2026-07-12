@@ -10,6 +10,7 @@
 #include <future>
 #include <limits>
 #include <ostream>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -208,6 +209,12 @@ bool containsFive(std::uint16_t mask)
 
 }  // namespace
 
+std::uint64_t generateRandomSeed()
+{
+  std::random_device device;
+  return (static_cast<std::uint64_t>(device()) << 32) ^ static_cast<std::uint64_t>(device());
+}
+
 Gomoku::Gomoku() : Gomoku(compiledEvaluationTables()) {}
 
 Gomoku::Gomoku(EvaluationTablesPtr evaluationTables)
@@ -268,9 +275,10 @@ std::pair<int, int> Gomoku::placePiece(SearchOptions options)
   transpositionTable.beginSearch();
   const int depth = std::max(1, options.depth);
   const int frontierRadius = std::clamp(options.frontierRadius, 1, 4);
+  const std::uint64_t seed = options.seed.value_or(generateRandomSeed());
   const auto move = options.threadCount > 1
-                        ? parallelRootSearch(depth, turn, frontierRadius, options.threadCount)
-                        : negaMax(depth, -kInfinity, kInfinity, turn, -1, -1, frontierRadius);
+                        ? parallelRootSearch(depth, turn, frontierRadius, options.threadCount, seed)
+                        : negaMax(depth, -kInfinity, kInfinity, turn, -1, -1, frontierRadius, seed);
   int x = std::get<1>(move);
   int y = std::get<2>(move);
 
@@ -451,6 +459,7 @@ Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
                             totalScore(opponent, PatternTurn::OPPONENT_TO_MOVE);
   const Board::Bitboard candidates = board.frontier(frontierRadius);
   MoveList result;
+  bool foundWinningMove = false;
 
   for (std::size_t wordIndex = 0; wordIndex < candidates.size(); ++wordIndex) {
     std::uint64_t word = candidates[wordIndex];
@@ -464,14 +473,21 @@ Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
       setPieceInternal(x, y, current);
       if (singlePieceWinner(x, y)) {
         setPieceInternal(x, y, Piece::EMPTY);
-        result.moves[0] = {.score = kMateScore,
-                           .x = static_cast<std::uint8_t>(x),
-                           .y = static_cast<std::uint8_t>(y)};
-        result.size = 1;
-        return result;
+        if (!foundWinningMove) {
+          result.size = 0;
+          foundWinningMove = true;
+        }
+        result.moves[result.size++] = {.score = kMateScore,
+                                       .x = static_cast<std::uint8_t>(x),
+                                       .y = static_cast<std::uint8_t>(y)};
+        continue;
       }
       const Score currentScore = totalScore(current, PatternTurn::OPPONENT_TO_MOVE);
       setPieceInternal(x, y, Piece::EMPTY);
+
+      if (foundWinningMove) {
+        continue;
+      }
 
       setPieceInternal(x, y, opponent);
       const Score score = singlePieceWinner(x, y)
@@ -491,13 +507,35 @@ Gomoku::MoveList Gomoku::genBestMoves(Piece current, int frontierRadius)
   return result;
 }
 
+void Gomoku::shuffleEqualMoves(MoveList& moves, Piece next, std::uint64_t seed) const
+{
+  std::uint64_t randomState = seed ^ positionHash ^
+                              zobristKeys().sideToMove[playerIndex(next)];
+  for (std::size_t groupBegin = 0; groupBegin < moves.size;) {
+    std::size_t groupEnd = groupBegin + 1;
+    while (groupEnd < moves.size && moves.moves[groupEnd].score == moves.moves[groupBegin].score) {
+      ++groupEnd;
+    }
+    for (std::size_t index = groupEnd; index > groupBegin + 1; --index) {
+      const std::size_t selected =
+          groupBegin + static_cast<std::size_t>(splitMix64(randomState) % (index - groupBegin));
+      std::swap(moves.moves[index - 1], moves.moves[selected]);
+    }
+    groupBegin = groupEnd;
+  }
+}
+
 Gomoku::ScoreXY Gomoku::parallelRootSearch(int depth, Piece next, int frontierRadius,
-                                           unsigned int threadCount)
+                                           unsigned int threadCount, std::uint64_t seed)
 {
   MoveList moves = genBestMoves(next, frontierRadius);
   if (moves.size == 0) {
     return std::make_tuple(0, -1, -1);
   }
+
+  // Keep stronger tactical ordering intact, but vary the order of moves with
+  // exactly the same root evaluation. Search ties are resolved by first move.
+  shuffleEqualMoves(moves, next, seed);
 
   std::array<Score, kMaximumMoveCount> values{};
   values.fill(-kInfinity);
@@ -573,7 +611,8 @@ Gomoku::ScoreXY Gomoku::parallelRootSearch(int depth, Piece next, int frontierRa
 }
 
 Gomoku::ScoreXY Gomoku::negaMax(int depth, Score alpha, Score beta, Piece next, int lastX,
-                                int lastY, int frontierRadius)
+                                int lastY, int frontierRadius,
+                                std::optional<std::uint64_t> rootSeed)
 {
   if (lastX >= 0 && singlePieceWinner(lastX, lastY)) {
     return std::make_tuple(-kMateScore - depth, -1, -1);
@@ -614,6 +653,9 @@ Gomoku::ScoreXY Gomoku::negaMax(int depth, Score alpha, Score beta, Piece next, 
   if (moves.size == 0) {
     transpositionTable.store(key, depth, 0, BoundType::EXACT, -1, -1);
     return std::make_tuple(0, -1, -1);
+  }
+  if (rootSeed) {
+    shuffleEqualMoves(moves, next, *rootSeed);
   }
 
   if (tableX >= 0 && tableY >= 0) {

@@ -110,8 +110,10 @@ template <typename PatternRange>
 constexpr void generate(const PatternRange& patterns, EvaluationTables& suffixTables,
                         EvaluationTables& tables)
 {
-  suffixTables = {};
-  tables = {};
+  suffixTables.opponentToMove.fill(0);
+  suffixTables.ownerToMove.fill(0);
+  tables.opponentToMove.fill(0);
+  tables.ownerToMove.fill(0);
   for (std::size_t row = 0; row < kEncodedRowCount; ++row) {
     const auto encoded = static_cast<std::uint16_t>(row);
     const RowEvaluation evaluation = evaluateSuffix(patterns, suffixTables, encoded);

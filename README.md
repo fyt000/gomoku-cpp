@@ -69,6 +69,17 @@ file I/O and dynamic-programming initialization during normal startup.
 
 The raylib GUI lets the player choose Black (first) or White (second), places black and white stones on a 15×15 grid, and retracts the last completed human/computer turn. It runs natively on Windows, macOS, and Linux (raylib's supported desktop platforms).
 
+When multiple moves have the same best evaluation, the engine chooses between
+them using a random seed. The active seed is shown in the GUI. Click the field
+to edit it, then press Enter or **Apply**; **Random** generates a fresh seed and
+**Copy** puts the active seed on the clipboard. Pass a seed to reproduce a game
+while debugging; without one, a seed is generated at startup:
+
+```powershell
+.\out\build\windows-debug\Debug\gomoku-gui.exe --seed 12345
+.\out\build\windows-debug\Debug\gomoku-gui.exe --seed 12345 pattern.txt
+```
+
 The side-panel effort selector controls search depth, frontier radius, and root-search threading:
 
 - Light: depth 2, radius 1, one thread

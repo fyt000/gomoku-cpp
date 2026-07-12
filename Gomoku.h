@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -20,7 +21,12 @@ struct SearchOptions {
   // Parallelizes root moves. Values are clamped to the available CPU core
   // count and to eight, bounding per-thread transposition-table memory.
   unsigned int threadCount = 1;
+  // Equal root evaluations are resolved deterministically from this seed and
+  // the current position. When omitted, a seed is generated for this search.
+  std::optional<std::uint64_t> seed;
 };
+
+[[nodiscard]] std::uint64_t generateRandomSeed();
 
 class Gomoku {
   using Score = std::int64_t;
@@ -105,10 +111,12 @@ class Gomoku {
   void setPieceInternal(int x, int y, Piece piece);
   [[nodiscard]] Score totalScore(Piece player, PatternTurn patternTurn) const;
   [[nodiscard]] MoveList genBestMoves(Piece current, int frontierRadius);
+  void shuffleEqualMoves(MoveList& moves, Piece next, std::uint64_t seed) const;
   [[nodiscard]] ScoreXY parallelRootSearch(int depth, Piece next, int frontierRadius,
-                                           unsigned int threadCount);
+                                           unsigned int threadCount, std::uint64_t seed);
   [[nodiscard]] ScoreXY negaMax(int depth, Score alpha, Score beta, Piece next, int lastX,
-                                int lastY, int frontierRadius);
+                                int lastY, int frontierRadius,
+                                std::optional<std::uint64_t> rootSeed = std::nullopt);
   [[nodiscard]] int singlePieceWinner(int x, int y) const;
 };
 

@@ -8,11 +8,14 @@
 #endif
 
 #include <chrono>
+#include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <future>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +47,12 @@ constexpr float kFirstButtonTop = 569.0F;
 constexpr float kSecondButtonTop = 624.0F;
 constexpr float kButtonHeight = 46.0F;
 constexpr float kEffortTop = 133.0F;
+constexpr float kSeedTop = 221.0F;
+constexpr float kSeedFieldTop = 246.0F;
+constexpr float kSeedFieldHeight = 36.0F;
+constexpr float kSeedButtonTop = 290.0F;
+constexpr float kSeedButtonHeight = 36.0F;
+constexpr float kSeedButtonGap = 7.0F;
 constexpr float kEffortArrowWidth = 46.0F;
 constexpr float kEffortValueWidth = kButtonWidth - 2.0F * kEffortArrowWidth;
 constexpr Color kBoardColor{222, 179, 104, 255};
@@ -107,6 +116,29 @@ struct EffortSelectorBounds {
   Rectangle next;
 };
 
+struct SeedEditorBounds {
+  Rectangle field;
+  Rectangle apply;
+  Rectangle random;
+  Rectangle copy;
+};
+
+SeedEditorBounds seedEditorBounds()
+{
+  constexpr float applyWidth = 64.0F;
+  constexpr float randomWidth = 91.0F;
+  constexpr float copyWidth =
+      kButtonWidth - applyWidth - randomWidth - 2.0F * kSeedButtonGap;
+  return {
+      .field = {kButtonLeft, kSeedFieldTop, kButtonWidth, kSeedFieldHeight},
+      .apply = {kButtonLeft, kSeedButtonTop, applyWidth, kSeedButtonHeight},
+      .random = {kButtonLeft + applyWidth + kSeedButtonGap, kSeedButtonTop, randomWidth,
+                 kSeedButtonHeight},
+      .copy = {kButtonLeft + applyWidth + kSeedButtonGap + randomWidth + kSeedButtonGap,
+               kSeedButtonTop, copyWidth, kSeedButtonHeight},
+  };
+}
+
 EffortSelectorBounds effortSelectorBounds()
 {
   return {
@@ -155,6 +187,46 @@ void drawEffortSelector(SearchEffort effort, bool enabled)
                         (options.threadCount == 1 ? " thread" : " threads");
   DrawText(details.c_str(), static_cast<int>(kButtonLeft), static_cast<int>(kEffortTop + 57.0F), 14,
            Color{170, 179, 190, 255});
+}
+
+void drawSeedEditor(const SeedEditorBounds& bounds, const std::string& text, bool focused,
+                    bool selected, bool invalid, bool copied, bool editable)
+{
+  DrawText("Seed", static_cast<int>(kButtonLeft), static_cast<int>(kSeedTop), 18,
+           Color{200, 207, 216, 255});
+
+  DrawRectangleRec(bounds.field,
+                   editable ? Color{47, 56, 68, 255} : Color{67, 73, 81, 255});
+  const Color border = invalid     ? Color{235, 92, 92, 255}
+                       : focused   ? Color{85, 174, 128, 255}
+                                   : Color{220, 225, 230, 255};
+  DrawRectangleLinesEx(bounds.field, focused ? 2.0F : 1.0F, border);
+  if (focused && selected && !text.empty()) {
+    const int selectionWidth = std::min(MeasureText(text.c_str(), 17),
+                                        static_cast<int>(bounds.field.width - 16.0F));
+    DrawRectangle(static_cast<int>(bounds.field.x + 8.0F),
+                  static_cast<int>(bounds.field.y + 8.0F), selectionWidth, 20, kAccentColor);
+  }
+  DrawText(text.c_str(), static_cast<int>(bounds.field.x + 8.0F),
+           static_cast<int>(bounds.field.y + 9.0F), 17, RAYWHITE);
+
+  drawButton(bounds.apply, "Apply", editable);
+  drawButton(bounds.random, "Random", editable);
+  drawButton(bounds.copy, copied ? "Done" : "Copy");
+}
+
+bool parseSeed(std::string_view text, std::uint64_t& seed)
+{
+  const char* begin = text.data();
+  const char* end = begin + text.size();
+  const auto result = std::from_chars(begin, end, seed);
+  return result.ec == std::errc{} && result.ptr == end;
+}
+
+bool shortcutKeyDown()
+{
+  return IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL) ||
+         IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
 }
 
 void drawThinking(float x, float y)
@@ -422,13 +494,31 @@ int run(int argc, char** argv)
     return 0;
   }
 
-  if (argc > 2) {
-    TraceLog(LOG_ERROR, "Usage: gomoku-gui [pattern-file | --licenses]");
-    return 1;
+  std::string_view patternFile;
+  std::uint64_t seed = generateRandomSeed();
+  for (int argument = 1; argument < argc; ++argument) {
+    const std::string_view value = argv[argument];
+    if (value == "--seed") {
+      if (++argument >= argc || !parseSeed(argv[argument], seed)) {
+        TraceLog(LOG_ERROR, "--seed requires an unsigned 64-bit integer");
+        return 1;
+      }
+    } else if (value.starts_with("--seed=")) {
+      if (!parseSeed(value.substr(7), seed)) {
+        TraceLog(LOG_ERROR, "--seed requires an unsigned 64-bit integer");
+        return 1;
+      }
+    } else if (value.starts_with("--") || !patternFile.empty()) {
+      TraceLog(LOG_ERROR, "Usage: gomoku-gui [--seed number] [pattern-file | --licenses]");
+      return 1;
+    } else {
+      patternFile = value;
+    }
   }
 
   const EvaluationTablesPtr evaluationTables =
-      argc == 2 ? RowEvaluator{}.loadPatterns(argv[1]) : compiledEvaluationTables();
+      !patternFile.empty() ? RowEvaluator{}.loadPatterns(std::string(patternFile))
+                           : compiledEvaluationTables();
   GameSession game(evaluationTables);
 
   Piece human = Piece::BLACK;
@@ -438,26 +528,127 @@ int run(int argc, char** argv)
   std::future<std::pair<int, int>> pendingComputerMove;
   LastComputerMove lastComputerMove;
   std::string status = "Choose a side.";
+  std::string seedText = std::to_string(seed);
+  bool seedFieldFocused = false;
+  bool seedTextSelected = false;
+  bool seedTextInvalid = false;
+  double seedCopiedUntil = 0.0;
+  const auto currentSearchOptions = [&] {
+    SearchOptions options = searchOptionsForEffort(effort);
+    options.seed = seed;
+    return options;
+  };
 
   InitWindow(kWindowWidth, kWindowHeight, "Gomoku");
   SetTargetFPS(60);
   while (!WindowShouldClose()) {
     const Rectangle firstButton{kButtonLeft, kFirstButtonTop, kButtonWidth, kButtonHeight};
     const Rectangle secondButton{kButtonLeft, kSecondButtonTop, kButtonWidth, kButtonHeight};
+    const SeedEditorBounds seedBounds = seedEditorBounds();
     collectComputerMove(game, human, status, pendingComputerMove, computerThinking,
                         lastComputerMove);
     updateEffortSelector(effort, !computerThinking);
+
+    const bool mousePressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    if (mousePressed && !computerThinking &&
+        CheckCollisionPointRec(GetMousePosition(), seedBounds.field)) {
+      seedFieldFocused = true;
+      seedTextSelected = true;
+      seedTextInvalid = false;
+    } else if (mousePressed) {
+      seedFieldFocused = false;
+      seedTextSelected = false;
+    }
+
+    if (computerThinking) {
+      seedFieldFocused = false;
+      seedTextSelected = false;
+    }
+    if (seedFieldFocused) {
+      if (shortcutKeyDown() && IsKeyPressed(KEY_A)) {
+        seedTextSelected = true;
+      }
+      if (shortcutKeyDown() && IsKeyPressed(KEY_V)) {
+        const char* clipboardText = GetClipboardText();
+        std::uint64_t pastedSeed = 0;
+        if (clipboardText && parseSeed(clipboardText, pastedSeed)) {
+          seedText = clipboardText;
+          seedTextSelected = false;
+          seedTextInvalid = false;
+        } else {
+          seedTextInvalid = true;
+        }
+      }
+
+      int character = GetCharPressed();
+      while (character > 0) {
+        if (character >= '0' && character <= '9') {
+          if (seedTextSelected) {
+            seedText.clear();
+            seedTextSelected = false;
+          }
+          if (seedText.size() < 20) {
+            seedText.push_back(static_cast<char>(character));
+            seedTextInvalid = false;
+          }
+        }
+        character = GetCharPressed();
+      }
+      if (IsKeyPressed(KEY_BACKSPACE)) {
+        if (seedTextSelected) {
+          seedText.clear();
+          seedTextSelected = false;
+        } else if (!seedText.empty()) {
+          seedText.pop_back();
+        }
+        seedTextInvalid = false;
+      }
+      if (IsKeyPressed(KEY_ESCAPE)) {
+        seedText = std::to_string(seed);
+        seedFieldFocused = false;
+        seedTextSelected = false;
+        seedTextInvalid = false;
+      }
+    }
+
+    const bool applySeed = buttonClicked(seedBounds.apply, !computerThinking) ||
+                           (seedFieldFocused && IsKeyPressed(KEY_ENTER));
+    if (applySeed) {
+      std::uint64_t parsedSeed = 0;
+      if (parseSeed(seedText, parsedSeed)) {
+        seed = parsedSeed;
+        seedText = std::to_string(seed);
+        seedFieldFocused = false;
+        seedTextSelected = false;
+        seedTextInvalid = false;
+      } else {
+        seedFieldFocused = true;
+        seedTextInvalid = true;
+      }
+    }
+    if (buttonClicked(seedBounds.random, !computerThinking)) {
+      seed = generateRandomSeed();
+      seedText = std::to_string(seed);
+      seedFieldFocused = false;
+      seedTextSelected = false;
+      seedTextInvalid = false;
+    }
+    if (buttonClicked(seedBounds.copy)) {
+      const std::string activeSeedText = std::to_string(seed);
+      SetClipboardText(activeSeedText.c_str());
+      seedCopiedUntil = GetTime() + 1.5;
+    }
     if (!gameStarted) {
       if (buttonClicked(firstButton)) {
         human = Piece::BLACK;
         gameStarted = true;
         startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                  searchOptionsForEffort(effort));
+                  currentSearchOptions());
       } else if (buttonClicked(secondButton)) {
         human = Piece::WHITE;
         gameStarted = true;
         startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                  searchOptionsForEffort(effort));
+                  currentSearchOptions());
       } else {
         int row = 0;
         int column = 0;
@@ -465,7 +656,7 @@ int run(int argc, char** argv)
           human = Piece::BLACK;
           gameStarted = true;
           startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                    searchOptionsForEffort(effort));
+                    currentSearchOptions());
         }
       }
     } else {
@@ -477,7 +668,7 @@ int run(int argc, char** argv)
       }
     }
     (void)boardClickToMove(game, human, gameStarted, status, pendingComputerMove, computerThinking,
-                           searchOptionsForEffort(effort));
+                           currentSearchOptions());
 
     BeginDrawing();
     ClearBackground(Color{240, 242, 245, 255});
@@ -498,6 +689,8 @@ int run(int argc, char** argv)
                                           : "Click board to play.";
     DrawText(hint, static_cast<int>(kPanelContentLeft), 69, 17, Color{185, 194, 202, 255});
     drawEffortSelector(effort, !computerThinking);
+    drawSeedEditor(seedBounds, seedText, seedFieldFocused, seedTextSelected, seedTextInvalid,
+                   GetTime() < seedCopiedUntil, !computerThinking);
     if (gameStarted) {
       drawButton(firstButton, "Retract turn", !computerThinking && canRetract(game, human));
       drawButton(secondButton, "New game", !computerThinking);

@@ -386,6 +386,32 @@ TEST_CASE("Computer opens at the centre", "[gomoku][engine]")
   CHECK(game.currentTurn() == Piece::WHITE);
 }
 
+TEST_CASE("Equal evaluations use reproducible seeded tie breaking", "[gomoku][engine][seed]")
+{
+  const SearchOptions options{.depth = 1, .frontierRadius = 1, .threadCount = 1, .seed = 12345};
+  Gomoku first(zeroTables());
+  Gomoku second(zeroTables());
+  REQUIRE(first.placePiece(7, 7));
+  REQUIRE(second.placePiece(7, 7));
+
+  CHECK(first.placePiece(options) == second.placePiece(options));
+
+  std::array<bool, kBoardSize * kBoardSize> selected{};
+  int distinctMoves = 0;
+  for (std::uint64_t seed = 0; seed < 16; ++seed) {
+    Gomoku game(zeroTables());
+    REQUIRE(game.placePiece(7, 7));
+    const auto [row, column] = game.placePiece(
+        SearchOptions{.depth = 1, .frontierRadius = 1, .threadCount = 1, .seed = seed});
+    const std::size_t index = static_cast<std::size_t>(row * kBoardSize + column);
+    if (!selected[index]) {
+      selected[index] = true;
+      ++distinctMoves;
+    }
+  }
+  CHECK(distinctMoves > 1);
+}
+
 TEST_CASE("Computer takes an immediate five", "[gomoku][engine]")
 {
   Piece cells[kBoardSize][kBoardSize] = {};
@@ -468,8 +494,10 @@ TEST_CASE("Parallel root search agrees with serial search", "[gomoku][engine][th
   serial.setBoard(cells);
   parallel.setBoard(cells);
 
-  const auto serialMove = serial.placePiece(SearchOptions{.depth = 4, .threadCount = 1});
-  const auto parallelMove = parallel.placePiece(SearchOptions{.depth = 4, .threadCount = 4});
+  const auto serialMove =
+      serial.placePiece(SearchOptions{.depth = 4, .threadCount = 1, .seed = 42});
+  const auto parallelMove =
+      parallel.placePiece(SearchOptions{.depth = 4, .threadCount = 4, .seed = 42});
   CHECK(parallelMove == serialMove);
 
   Gomoku wideSerial(syntheticTables());
@@ -477,9 +505,11 @@ TEST_CASE("Parallel root search agrees with serial search", "[gomoku][engine][th
   wideSerial.setBoard(cells);
   wideParallel.setBoard(cells);
   const auto wideSerialMove =
-      wideSerial.placePiece(SearchOptions{.depth = 2, .frontierRadius = 3, .threadCount = 1});
+      wideSerial.placePiece(
+          SearchOptions{.depth = 2, .frontierRadius = 3, .threadCount = 1, .seed = 42});
   const auto wideParallelMove =
-      wideParallel.placePiece(SearchOptions{.depth = 2, .frontierRadius = 3, .threadCount = 4});
+      wideParallel.placePiece(
+          SearchOptions{.depth = 2, .frontierRadius = 3, .threadCount = 4, .seed = 42});
   CHECK(wideParallelMove == wideSerialMove);
 }
 
