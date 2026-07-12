@@ -1,0 +1,29 @@
+#include "LicenseNotices.h"
+
+#include <iostream>
+#include <string_view>
+
+namespace gomoku {
+
+namespace {
+
+constexpr std::string_view kProjectLicense =
+    R"GOMOKU_LIC(@GOMOKU_PROJECT_LICENSE@)GOMOKU_LIC";
+
+constexpr std::string_view kThirdPartyNotices =
+    R"GOMOKU_3P(@GOMOKU_THIRD_PARTY_NOTICES@)GOMOKU_3P";
+
+}  // namespace
+
+bool printLicenseNoticesIfRequested(int argc, char** argv)
+{
+  if (argc != 2 || std::string_view(argv[1]) != "--licenses") {
+    return false;
+  }
+
+  std::cout << "gomoku-cpp\n==========\n\n" << kProjectLicense
+            << "\n\n" << kThirdPartyNotices;
+  return true;
+}
+
+}  // namespace gomoku

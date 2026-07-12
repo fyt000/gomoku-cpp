@@ -21,6 +21,7 @@
 
 #include "CompiledEvaluationTables.h"
 #include "GameSession.h"
+#include "LicenseNotices.h"
 #include "RowEvaluator.h"
 
 namespace gomoku::gui {
@@ -446,8 +447,12 @@ bool canRetract(const GameSession& game, Piece human)
 
 int run(int argc, char** argv)
 {
+  if (printLicenseNoticesIfRequested(argc, argv)) {
+    return 0;
+  }
+
   if (argc > 2) {
-    TraceLog(LOG_ERROR, "Usage: gomoku-gui [pattern-file]");
+    TraceLog(LOG_ERROR, "Usage: gomoku-gui [pattern-file | --licenses]");
     return 1;
   }
 

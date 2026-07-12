@@ -66,11 +66,25 @@ ${gomoku_pattern_entries}}};
 configure_file("${gomoku_pattern_header_temporary}" "${gomoku_pattern_header}" COPYONLY)
 file(REMOVE "${gomoku_pattern_header_temporary}")
 
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
+)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" GOMOKU_PROJECT_LICENSE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt"
+  GOMOKU_THIRD_PARTY_NOTICES)
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/LicenseNotices.cpp.in"
+  "${gomoku_generated_directory}/LicenseNotices.cpp"
+  @ONLY
+)
+
 add_library(gomoku_engine STATIC
   BitRowBuilder.cpp
   Board.cpp
   CompiledEvaluationTables.cpp
   Gomoku.cpp
+  "${gomoku_generated_directory}/LicenseNotices.cpp"
   RowEvaluator.cpp
 )
 

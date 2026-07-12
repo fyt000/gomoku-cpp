@@ -10,6 +10,7 @@
 
 #include "CompiledEvaluationTables.h"
 #include "Gomoku.h"
+#include "LicenseNotices.h"
 #include "RowEvaluator.h"
 
 namespace gomoku::server {
@@ -93,8 +94,12 @@ void handleBoardRequest(const httplib::Request& request, httplib::Response& resp
 
 int run(int argc, char** argv)
 {
+  if (printLicenseNoticesIfRequested(argc, argv)) {
+    return 0;
+  }
+
   if (argc > 2) {
-    std::cerr << "Usage: gomoku-server [pattern-file]\n";
+    std::cerr << "Usage: gomoku-server [pattern-file | --licenses]\n";
     return 1;
   }
 

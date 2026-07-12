@@ -10,6 +10,7 @@
 
 #include "CompiledEvaluationTables.h"
 #include "GameSession.h"
+#include "LicenseNotices.h"
 #include "RowEvaluator.h"
 
 namespace gomoku::mcp {
@@ -280,8 +281,12 @@ void handleRequest(GameSession& game, const Json& request)
 
 int run(int argc, char** argv)
 {
+  if (printLicenseNoticesIfRequested(argc, argv)) {
+    return 0;
+  }
+
   if (argc > 2) {
-    std::cerr << "Usage: gomoku-mcp [pattern-file]\n";
+    std::cerr << "Usage: gomoku-mcp [pattern-file | --licenses]\n";
     return 1;
   }
 

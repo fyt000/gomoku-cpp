@@ -44,6 +44,13 @@ The command-line demo is also available as `gomoku-cpp.exe`. All executables use
 the evaluation cache compiled from `pattern.txt` by default. An explicit pattern
 file can still be supplied as the sole argument for tuning and comparison.
 
+Every executable can print the project license and all bundled third-party
+notices without opening the GUI or starting a server:
+
+```powershell
+.\out\build\windows-debug\Debug\gomoku-gui.exe --licenses
+```
+
 Each non-comment line in `pattern.txt` has the form
 `pattern opponent-to-move owner-to-move`. The first score applies when the other
 player moves next; the second applies when the player owning the pattern moves
@@ -90,3 +97,10 @@ It provides these tools:
 ## VS Code
 
 Install the recommended C++ and CMake Tools extensions when prompted, then open this folder in VS Code. Press `F5` and select **Debug Gomoku GUI**: VS Code configures the `windows-debug` preset, builds only `gomoku-gui`, launches it with `pattern.txt` as a runtime override, and attaches the Visual Studio C++ debugger. The build task locates either CMake on `PATH` or Visual Studio's bundled CMake.
+
+## License
+
+gomoku-cpp is open source under the [MIT License](LICENSE). Dependencies retain
+their own permissive licenses; their copyright statements and license terms are
+collected in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and embedded in
+each executable for display with `--licenses`.

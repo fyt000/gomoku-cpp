@@ -4,6 +4,7 @@
 
 #include "CompiledEvaluationTables.h"
 #include "Gomoku.h"
+#include "LicenseNotices.h"
 #include "RowEvaluator.h"
 
 namespace gomoku::driver {
@@ -20,8 +21,12 @@ void printBoard(const Gomoku& game)
 
 int run(int argc, char** argv)
 {
+  if (printLicenseNoticesIfRequested(argc, argv)) {
+    return 0;
+  }
+
   if (argc > 2) {
-    std::cerr << "Usage: gomoku-cpp [pattern-file]\n";
+    std::cerr << "Usage: gomoku-cpp [pattern-file | --licenses]\n";
     return 1;
   }
 
