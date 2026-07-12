@@ -40,12 +40,13 @@ void setCorsHeaders(httplib::Response& response)
 template <typename Payload>
 void sendJson(httplib::Response& response, const Payload& payload)
 {
+  setCorsHeaders(response);
   std::string body;
   if (glz::write_json(payload, body)) {
     response.status = 500;
+    response.set_content("Failed to serialize JSON response\n", "text/plain");
     return;
   }
-  setCorsHeaders(response);
   response.set_content(body, "application/json");
 }
 

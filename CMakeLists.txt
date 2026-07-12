@@ -23,7 +23,7 @@ foreach(gomoku_pattern_line IN LISTS gomoku_pattern_lines)
     continue()
   endif()
   if(NOT gomoku_pattern_line MATCHES
-     "^([01]+)[ \\t]+([0-9]+)[ \\t]+([0-9]+)[ \\t]*$")
+     "^([01]+)[ \\t]+([0-9]+)[ \\t]+([0-9]+)([ \\t]+#.*)?[ \\t]*$")
     message(FATAL_ERROR "Invalid pattern line: ${gomoku_pattern_line}")
   endif()
   string(LENGTH "${CMAKE_MATCH_1}" gomoku_pattern_length)
@@ -158,6 +158,7 @@ if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$")
 endif()
 
 add_executable(gomoku-server GomokuServer.cpp)
+target_compile_features(gomoku-server PRIVATE cxx_std_23)
 target_link_libraries(gomoku-server PRIVATE
   gomoku_engine
   httplib::httplib

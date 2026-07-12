@@ -288,6 +288,38 @@ TEST_CASE("RowEvaluator rejects patterns longer than the board", "[row-evaluator
   std::filesystem::remove(path);
 }
 
+TEST_CASE("RowEvaluator handles comments without hiding malformed pattern lines",
+          "[row-evaluator]")
+{
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "gomoku-pattern-comments.txt";
+  RowEvaluator evaluator;
+
+  {
+    std::ofstream output(path);
+    output << "\n"
+              "   # an indented full-line comment\n"
+              "01111 100 8000000  # an inline comment\n";
+  }
+  const EvaluationTablesPtr tables = evaluator.loadPatterns(path.string());
+  CHECK(tables->opponentToMove[encodeRow("01111")] == 100);
+  CHECK(tables->ownerToMove[encodeRow("01111")] == 8000000);
+
+  for (const std::string_view invalidLine : {
+           "01111 100\n",
+           "01111 100 8000000 unexpected\n",
+           "01111 100 8000000#not-a-comment\n",
+       }) {
+    std::ofstream output(path);
+    output << invalidLine;
+    output.close();
+    CAPTURE(invalidLine);
+    CHECK_THROWS_AS((void)evaluator.loadPatterns(path.string()), std::runtime_error);
+  }
+
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("Pattern evaluations distinguish which side moves next", "[row-evaluator][patterns]")
 {
   const std::filesystem::path path = std::filesystem::path(GOMOKU_SOURCE_DIR) / "pattern.txt";
