@@ -17,6 +17,16 @@
       "displayName": "Windows Release",
       "inherits": "windows-debug",
       "binaryDir": "${sourceDir}/out/build/${presetName}"
+    },
+    {
+      "name": "windows-static-release",
+      "displayName": "Windows Static Release",
+      "inherits": "windows-release",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+      }
     }
   ],
   "buildPresets": [
@@ -28,6 +38,11 @@
     {
       "name": "windows-release",
       "configurePreset": "windows-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-static-release",
+      "configurePreset": "windows-static-release",
       "configuration": "Release"
     }
   ]

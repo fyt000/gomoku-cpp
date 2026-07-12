@@ -7,15 +7,12 @@
 #undef WHITE
 #endif
 
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <exception>
 #include <future>
 #include <iostream>
-#include <iterator>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,6 +20,7 @@
 #include "GameSession.h"
 #include "LicenseNotices.h"
 #include "RowEvaluator.h"
+#include "SearchEffort.h"
 
 namespace gomoku::gui {
 
@@ -56,35 +54,6 @@ struct LastComputerMove {
   int row = -1;
   int column = -1;
 };
-
-enum class Effort : int { LIGHT, MEDIUM, HIGH, MAX, ULTRA };
-
-struct EffortPreset {
-  const char* name;
-  int depth;
-  int frontierRadius;
-  unsigned int maximumThreads;
-};
-
-constexpr EffortPreset kEffortPresets[] = {{"Light", 2, 2, 1},
-                                           {"Medium", 3, 2, 1},
-                                           {"High", 4, 2, 1},
-                                           {"Max", 5, 3, 4},
-                                           {"Ultra", 6, 3, 8}};
-
-const EffortPreset& effortPreset(Effort effort)
-{
-  return kEffortPresets[static_cast<int>(effort)];
-}
-
-SearchOptions effortSearchOptions(Effort effort)
-{
-  const EffortPreset& preset = effortPreset(effort);
-  const unsigned int hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
-  return {.depth = preset.depth,
-          .frontierRadius = preset.frontierRadius,
-          .threadCount = std::min(preset.maximumThreads, hardwareThreads)};
-}
 
 const char* pieceName(Piece piece)
 {
@@ -148,34 +117,36 @@ EffortSelectorBounds effortSelectorBounds()
   };
 }
 
-void updateEffortSelector(Effort& effort, bool enabled)
+void updateEffortSelector(SearchEffort& effort, bool enabled)
 {
   const EffortSelectorBounds bounds = effortSelectorBounds();
   int index = static_cast<int>(effort);
   if (buttonClicked(bounds.previous, enabled && index > 0)) {
-    effort = static_cast<Effort>(index - 1);
+    effort = static_cast<SearchEffort>(index - 1);
   } else if (buttonClicked(bounds.next,
-                           enabled && index + 1 < static_cast<int>(std::size(kEffortPresets)))) {
-    effort = static_cast<Effort>(index + 1);
+                           enabled && index + 1 < static_cast<int>(kSearchEffortPresets.size()))) {
+    effort = static_cast<SearchEffort>(index + 1);
   }
 }
 
-void drawEffortSelector(Effort effort, bool enabled)
+void drawEffortSelector(SearchEffort effort, bool enabled)
 {
   const EffortSelectorBounds bounds = effortSelectorBounds();
   const int index = static_cast<int>(effort);
-  const EffortPreset& preset = effortPreset(effort);
-  const SearchOptions options = effortSearchOptions(effort);
+  const SearchEffortPreset& preset = searchEffortPreset(effort);
+  const SearchOptions options = searchOptionsForEffort(effort);
 
   DrawText("Effort", static_cast<int>(kButtonLeft), static_cast<int>(kEffortTop - 28.0F), 18,
            Color{200, 207, 216, 255});
   drawButton(bounds.previous, "<", enabled && index > 0);
-  drawButton(bounds.next, ">", enabled && index + 1 < static_cast<int>(std::size(kEffortPresets)));
+  drawButton(bounds.next, ">",
+             enabled && index + 1 < static_cast<int>(kSearchEffortPresets.size()));
 
   DrawRectangleRec(bounds.value, enabled ? Color{47, 56, 68, 255} : Color{67, 73, 81, 255});
   DrawRectangleLinesEx(bounds.value, 1.0F, Color{220, 225, 230, 255});
-  const int nameWidth = MeasureText(preset.name, 20);
-  DrawText(preset.name, static_cast<int>(bounds.value.x + (bounds.value.width - nameWidth) / 2.0F),
+  const int nameWidth = MeasureText(preset.displayName.data(), 20);
+  DrawText(preset.displayName.data(),
+           static_cast<int>(bounds.value.x + (bounds.value.width - nameWidth) / 2.0F),
            static_cast<int>(bounds.value.y + 13.0F), 20, RAYWHITE);
 
   std::string details = "Depth " + std::to_string(options.depth) + "  |  Radius " +
@@ -461,7 +432,7 @@ int run(int argc, char** argv)
   GameSession game(evaluationTables);
 
   Piece human = Piece::BLACK;
-  Effort effort = Effort::HIGH;
+  SearchEffort effort = SearchEffort::HIGH;
   bool gameStarted = false;
   bool computerThinking = false;
   std::future<std::pair<int, int>> pendingComputerMove;
@@ -481,12 +452,12 @@ int run(int argc, char** argv)
         human = Piece::BLACK;
         gameStarted = true;
         startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                  effortSearchOptions(effort));
+                  searchOptionsForEffort(effort));
       } else if (buttonClicked(secondButton)) {
         human = Piece::WHITE;
         gameStarted = true;
         startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                  effortSearchOptions(effort));
+                  searchOptionsForEffort(effort));
       } else {
         int row = 0;
         int column = 0;
@@ -494,7 +465,7 @@ int run(int argc, char** argv)
           human = Piece::BLACK;
           gameStarted = true;
           startGame(game, human, status, pendingComputerMove, computerThinking, lastComputerMove,
-                    effortSearchOptions(effort));
+                    searchOptionsForEffort(effort));
         }
       }
     } else {
@@ -506,7 +477,7 @@ int run(int argc, char** argv)
       }
     }
     (void)boardClickToMove(game, human, gameStarted, status, pendingComputerMove, computerThinking,
-                           effortSearchOptions(effort));
+                           searchOptionsForEffort(effort));
 
     BeginDrawing();
     ClearBackground(Color{240, 242, 245, 255});

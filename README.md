@@ -71,13 +71,15 @@ The raylib GUI lets the player choose Black (first) or White (second), places bl
 
 The side-panel effort selector controls search depth, frontier radius, and root-search threading:
 
-- Light: depth 2, radius 2, one thread
+- Light: depth 2, radius 1, one thread
 - Medium: depth 3, radius 2, one thread
-- High: depth 4, radius 2, one thread
-- Max: depth 5, radius 3, up to four threads
+- High: depth 5, radius 2, one thread
+- Max: depth 6, radius 2, up to four threads
 - Ultra: depth 6, radius 3, up to eight threads
 
-Thread counts are limited by the available hardware.
+Thread counts are limited by the available physical CPU cores on Windows (so
+Hyper-Threading siblings do not count) and by the logical CPU count reported by
+standard C++ on other platforms.
 
 ### MCP server
 
@@ -92,7 +94,11 @@ It provides these tools:
 - `new_game` — reset the session (Black moves first)
 - `game_state` — read the flattened board and game status
 - `play_move` — play the current side at zero-based `x` (row), `y` (column)
-- `computer_move` — ask the built-in engine to play the current side
+- `computer_move` — ask the built-in engine to play the current side; accepts an optional
+  `effort` of `light`, `medium`, `high` (default), `max`, or `ultra`, matching the GUI presets
+
+Game-state responses include `boardSize: 15` and a 15×15 nested `board`, indexed as
+`board[x][y]`, where `0` is empty, `1` is Black, and `2` is White.
 
 ## VS Code
 

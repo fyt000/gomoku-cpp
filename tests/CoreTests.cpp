@@ -13,11 +13,54 @@
 #include "CompiledEvaluationTables.h"
 #include "GameSession.h"
 #include "Gomoku.h"
+#include "HardwareConcurrency.h"
 #include "RowEvaluator.h"
+#include "SearchEffort.h"
 
 namespace gomoku::test {
 
 namespace {
+
+TEST_CASE("search effort presets match the user-facing levels")
+{
+  REQUIRE(availableSearchThreadCount() >= 1);
+
+  REQUIRE(parseSearchEffort("light") == SearchEffort::LIGHT);
+  REQUIRE(parseSearchEffort("medium") == SearchEffort::MEDIUM);
+  REQUIRE(parseSearchEffort("high") == SearchEffort::HIGH);
+  REQUIRE(parseSearchEffort("max") == SearchEffort::MAX);
+  REQUIRE(parseSearchEffort("ultra") == SearchEffort::ULTRA);
+  REQUIRE_FALSE(parseSearchEffort("maximum"));
+
+  const SearchOptions light = searchOptionsForEffort(SearchEffort::LIGHT);
+  REQUIRE(light.depth == 2);
+  REQUIRE(light.frontierRadius == 1);
+  REQUIRE(light.threadCount == 1);
+
+  const SearchOptions medium = searchOptionsForEffort(SearchEffort::MEDIUM);
+  REQUIRE(medium.depth == 3);
+  REQUIRE(medium.frontierRadius == 2);
+  REQUIRE(medium.threadCount == 1);
+
+  const SearchOptions high = searchOptionsForEffort(SearchEffort::HIGH);
+  REQUIRE(high.depth == 5);
+  REQUIRE(high.frontierRadius == 2);
+  REQUIRE(high.threadCount == 1);
+
+  const SearchOptions max = searchOptionsForEffort(SearchEffort::MAX);
+  REQUIRE(max.depth == 6);
+  REQUIRE(max.frontierRadius == 2);
+  REQUIRE(max.threadCount >= 1);
+  REQUIRE(max.threadCount <= 4);
+  REQUIRE(max.threadCount <= availableSearchThreadCount());
+
+  const SearchOptions ultra = searchOptionsForEffort(SearchEffort::ULTRA);
+  REQUIRE(ultra.depth == 6);
+  REQUIRE(ultra.frontierRadius == 3);
+  REQUIRE(ultra.threadCount >= 1);
+  REQUIRE(ultra.threadCount <= 8);
+  REQUIRE(ultra.threadCount <= availableSearchThreadCount());
+}
 
 EvaluationTablesPtr zeroTables()
 {
@@ -253,11 +296,15 @@ TEST_CASE("Pattern evaluations distinguish which side moves next", "[row-evaluat
 
   const std::size_t halfOpenFour = encodeRow("01111");
   CHECK(tables->opponentToMove[halfOpenFour] == 100);
-  CHECK(tables->ownerToMove[halfOpenFour] == 20000);
+  CHECK(tables->ownerToMove[halfOpenFour] == 8000000);
 
   const std::size_t openFour = encodeRow("011110");
-  CHECK(tables->opponentToMove[openFour] == 20000);
+  CHECK(tables->opponentToMove[openFour] == 8000000);
   CHECK(tables->ownerToMove[openFour] == 8000000);
+
+  const std::size_t gappedThree = encodeRow("011010");
+  CHECK(tables->opponentToMove[gappedThree] == 100);
+  CHECK(tables->ownerToMove[gappedThree] == 4000);
 }
 
 TEST_CASE("Pattern table covers every half-open four shape", "[row-evaluator][patterns]")
@@ -268,7 +315,7 @@ TEST_CASE("Pattern table covers every half-open four shape", "[row-evaluator][pa
 
   for (const std::string_view pattern : {"01111", "011101", "011011", "010111"}) {
     CAPTURE(pattern);
-    CHECK(tables->ownerToMove[encodeRow(pattern)] == 20000);
+    CHECK(tables->ownerToMove[encodeRow(pattern)] == 8000000);
   }
 }
 

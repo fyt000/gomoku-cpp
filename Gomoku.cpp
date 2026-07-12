@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "CompiledEvaluationTables.h"
+#include "HardwareConcurrency.h"
 
 namespace gomoku {
 
@@ -512,7 +513,8 @@ Gomoku::ScoreXY Gomoku::parallelRootSearch(int depth, Piece next, int frontierRa
   std::atomic<std::size_t> nextMove{1};
   std::atomic<Score> sharedAlpha{values[0]};
   const unsigned int workers =
-      std::min({threadCount, static_cast<unsigned int>(moves.size), kMaximumRootThreads});
+      std::min({threadCount, static_cast<unsigned int>(moves.size), kMaximumRootThreads,
+                availableSearchThreadCount()});
 
   const auto searchMoves = [this, &moves, &values, &nextMove, &sharedAlpha, depth, next,
                             frontierRadius](bool beginThreadSearch) {

@@ -17,8 +17,8 @@ struct SearchOptions {
   // Candidate cells within this Chebyshev distance of existing stones.
   // Values are clamped to 1-4; radius two is the recommended default.
   int frontierRadius = 2;
-  // Parallelizes root moves. Values above eight are clamped to bound the
-  // memory consumed by per-thread transposition tables.
+  // Parallelizes root moves. Values are clamped to the available CPU core
+  // count and to eight, bounding per-thread transposition-table memory.
   unsigned int threadCount = 1;
 };
 

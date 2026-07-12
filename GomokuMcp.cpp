@@ -12,6 +12,7 @@
 #include "GameSession.h"
 #include "LicenseNotices.h"
 #include "RowEvaluator.h"
+#include "SearchEffort.h"
 
 namespace gomoku::mcp {
 
@@ -61,14 +62,18 @@ Json gameState(const GameSession& game)
 {
   Json state;
   Json::array_t board;
-  board.reserve(kBoardSize * kBoardSize);
+  board.reserve(kBoardSize);
   for (int row = 0; row < kBoardSize; ++row) {
+    Json::array_t boardRow;
+    boardRow.reserve(kBoardSize);
     for (int column = 0; column < kBoardSize; ++column) {
-      board.emplace_back(static_cast<int>(game.getPiece(row, column)));
+      boardRow.emplace_back(static_cast<int>(game.getPiece(row, column)));
     }
+    board.emplace_back(std::move(boardRow));
   }
 
-  state["board"] = board;
+  state["boardSize"] = kBoardSize;
+  state["board"] = std::move(board);
   state["currentTurn"] = pieceName(game.currentTurn());
   state["moveCount"] = game.moveCount();
   const Piece winner = game.checkWinner();
@@ -148,12 +153,12 @@ Json toolsList()
   "tools": [
     {
       "name": "new_game",
-      "description": "Start a fresh Gomoku game. Black always moves first.",
+      "description": "Start a fresh Gomoku game and return its state. Black always moves first.",
       "inputSchema": {"type": "object", "additionalProperties": false}
     },
     {
       "name": "game_state",
-      "description": "Read the current board, side to move, winner, and move count.",
+      "description": "Read the current 15x15 board, side to move, winner, and move count. board is a nested array indexed as board[x][y], encoded as 0=empty, 1=black, 2=white.",
       "inputSchema": {"type": "object", "additionalProperties": false}
     },
     {
@@ -168,8 +173,19 @@ Json toolsList()
     },
     {
       "name": "computer_move",
-      "description": "Ask the built-in Gomoku engine to make the current side's move.",
-      "inputSchema": {"type": "object", "additionalProperties": false}
+      "description": "Ask the built-in Gomoku engine to make the current side's move. Higher effort searches deeper and may use more threads; the default is high.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "effort": {
+            "type": "string",
+            "enum": ["light", "medium", "high", "max", "ultra"],
+            "default": "high",
+            "description": "Search effort: light (depth 2, radius 1), medium (3, radius 2), high (5, radius 2), max (6, radius 2), or ultra (6, radius 3)."
+          }
+        },
+        "additionalProperties": false
+      }
     }
   ]
 }
@@ -205,10 +221,27 @@ Json runTool(GameSession& game, std::string_view name, const Json* arguments)
     return textResult(gameState(game));
   }
   if (name == "computer_move") {
+    SearchEffort effort = SearchEffort::HIGH;
+    if (arguments) {
+      const Json* effortValue = field(*arguments, "effort");
+      if (effortValue) {
+        if (!effortValue->is_string()) {
+          return textError("computer_move effort must be a string.");
+        }
+        const std::optional<SearchEffort> parsedEffort =
+            parseSearchEffort(effortValue->get_string());
+        if (!parsedEffort) {
+          return textError(
+              "computer_move effort must be light, medium, high, max, or ultra.");
+        }
+        effort = *parsedEffort;
+      }
+    }
     if (game.checkWinner() != Piece::EMPTY || game.isBoardFull()) {
       return textError("The game is already finished. Call new_game to start again.");
     }
-    const auto [x, y] = game.placeComputerMove();
+    const SearchOptions searchOptions = searchOptionsForEffort(effort);
+    const auto [x, y] = game.placeComputerMove(searchOptions);
     if (x < 0 || y < 0) {
       return textError("The engine could not find a legal move.");
     }
@@ -217,6 +250,10 @@ Json runTool(GameSession& game, std::string_view name, const Json* arguments)
     move["x"] = x;
     move["y"] = y;
     state["move"] = std::move(move);
+    state["effort"] = searchEffortPreset(effort).id;
+    state["searchOptions"]["depth"] = searchOptions.depth;
+    state["searchOptions"]["frontierRadius"] = searchOptions.frontierRadius;
+    state["searchOptions"]["threadCount"] = searchOptions.threadCount;
     return textResult(state);
   }
   return textError("Unknown tool name.");

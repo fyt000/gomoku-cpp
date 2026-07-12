@@ -84,6 +84,7 @@ add_library(gomoku_engine STATIC
   Board.cpp
   CompiledEvaluationTables.cpp
   Gomoku.cpp
+  HardwareConcurrency.cpp
   "${gomoku_generated_directory}/LicenseNotices.cpp"
   RowEvaluator.cpp
 )
@@ -126,6 +127,35 @@ find_package(glaze CONFIG REQUIRED)
 find_package(raylib CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 target_link_libraries(gomoku_engine PUBLIC Threads::Threads)
+
+# raylib's package config exposes only one library path, which can select its
+# Debug library when using a multi-config Visual Studio generator. Supply the
+# per-configuration paths for vcpkg static builds and its Windows dependency.
+if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$")
+  find_package(glfw3 CONFIG REQUIRED)
+  set(gomoku_raylib_root
+    "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
+  )
+  set_target_properties(raylib PROPERTIES
+    IMPORTED_LOCATION_DEBUG
+      "${gomoku_raylib_root}/debug/lib/raylib.lib"
+    IMPORTED_IMPLIB_DEBUG
+      "${gomoku_raylib_root}/debug/lib/raylib.lib"
+    IMPORTED_LOCATION_RELEASE
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    IMPORTED_IMPLIB_RELEASE
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    IMPORTED_LOCATION_MINSIZEREL
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    IMPORTED_IMPLIB_MINSIZEREL
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    IMPORTED_LOCATION_RELWITHDEBINFO
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    IMPORTED_IMPLIB_RELWITHDEBINFO
+      "${gomoku_raylib_root}/lib/raylib.lib"
+    INTERFACE_LINK_LIBRARIES "glfw;winmm"
+  )
+endif()
 
 add_executable(gomoku-server GomokuServer.cpp)
 target_link_libraries(gomoku-server PRIVATE
